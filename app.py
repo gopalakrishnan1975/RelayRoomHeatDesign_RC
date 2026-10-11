@@ -82,6 +82,73 @@ optimal=comparison.loc[comparison["Grid import kWh/day"].idxmin()]
 opt_sp=float(optimal["Setpoint C"])
 components,thermal,power,solar_generation,grid_import,grid_export=simulate_setpoint(opt_sp)
 fixed_components,fixed_thermal,fixed_power,_,fixed_import,_=simulate_setpoint(target)
+
+st.subheader("Adaptive hourly temperature schedule — research simulation")
+thermal_mass = st.slider("Effective thermal capacitance (kWh per deg C)", 0.5, 20.0, 4.0, 0.5)
+max_rate = st.slider("Maximum hourly setpoint movement (deg C)", 0.5, 4.0, 1.0, 0.5)
+start_temp = st.slider("Starting room temperature (deg C)", min_target, max_target, min_target, 0.5)
+dynamic_objective = st.selectbox("Hourly optimization objective", ["Minimum grid imports", "Minimum electricity cost"])
+states = np.round(np.arange(min_target, max_target + 0.001, 0.5), 2)
+start_idx = int(np.argmin(np.abs(states - start_temp)))
+pv_output = pv_installed * sun / 1000 * 0.78
+hour_cop = np.maximum(2.0, 3.5 - 0.025 * np.maximum(0, temp - 35))
+
+def transition(hour, previous, setting):
+    gains = sum(load(float(temp[hour]), float(rhhour[hour]), float(sun[hour]), setpoint=float(setting)).values())
+    cooling = max(0.0, gains + thermal_mass * (previous - setting))
+    power = cooling / hour_cop[hour]
+    imports = max(0.0, power - pv_output[hour])
+    exports = max(0.0, pv_output[hour] - power)
+    penalty = imports if dynamic_objective == "Minimum grid imports" else imports * tariff - exports * export
+    return penalty, cooling, power, imports, exports
+
+dp = np.full((25, len(states)), np.inf)
+parents = np.full((24, len(states)), -1, dtype=int)
+dp[0, start_idx] = 0.0
+for hour in range(24):
+    for i, before in enumerate(states):
+        if not np.isfinite(dp[hour, i]):
+            continue
+        for j, after in enumerate(states):
+            if abs(after - before) > max_rate + 0.00001:
+                continue
+            score, _, _, _, _ = transition(hour, before, after)
+            cost = dp[hour, i] + score
+            if cost < dp[hour + 1, j]:
+                dp[hour + 1, j] = cost
+                parents[hour, j] = i
+
+# Close the daily cycle at its original temperature to avoid artificial savings.
+selected = start_idx
+schedule = np.zeros(24)
+for hour in range(23, -1, -1):
+    schedule[hour] = states[selected]
+    selected = parents[hour, selected]
+rows = []
+previous = float(states[start_idx])
+for hour, setting in enumerate(schedule):
+    _, cooling, power, imports, exports = transition(hour, previous, setting)
+    rows.append({"Hour": hour, "Room setpoint C": setting, "Outside temperature C": temp[hour],
+                 "Cooling load kW": cooling, "AC power kW": power,
+                 "Solar generation kW": pv_output[hour], "Grid import kW": imports,
+                 "Grid export kW": exports})
+    previous = setting
+dynamic_table = pd.DataFrame(rows)
+baseline_import = sum(transition(hour, float(states[start_idx]), float(states[start_idx]))[3] for hour in range(24))
+a1, a2, a3 = st.columns(3)
+a1.metric("Adaptive grid imports", "%.1f kWh/day" % dynamic_table["Grid import kW"].sum())
+a2.metric("Fixed start-temperature imports", "%.1f kWh/day" % baseline_import)
+a3.metric("Estimated grid savings", "%.1f kWh/day" % (baseline_import - dynamic_table["Grid import kW"].sum()))
+st.plotly_chart(px.line(dynamic_table, x="Hour", y=["Room setpoint C", "Outside temperature C"],
+                        title="Hourly room temperature schedule"), use_container_width=True)
+st.plotly_chart(px.line(dynamic_table, x="Hour",
+                        y=["AC power kW", "Solar generation kW", "Grid import kW"],
+                        title="Hourly electricity balance"), use_container_width=True)
+st.dataframe(dynamic_table.round(2), hide_index=True, use_container_width=True)
+st.download_button("Download adaptive schedule CSV", dynamic_table.to_csv(index=False),
+                   "adaptive_temperature_schedule.csv", mime="text/csv")
+st.warning("Illustrative lumped-capacitance model with synthetic weather, not a validated control algorithm. Follow approved relay and signalling-room temperature and humidity requirements. No direct control of AC or signalling equipment is implemented.")
+
 st.subheader("Energy balance and optimal AC temperature")
 k1,k2,k3,k4=st.columns(4)
 k1.metric("Optimal setpoint",f"{opt_sp:.1f} °C")
