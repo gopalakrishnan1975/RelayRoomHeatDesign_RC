@@ -14,7 +14,7 @@ with st.sidebar:
  Aw=st.slider("Window m2",0.,15.,3.);Uw=st.slider("Window U value",.7,7.,5.7)
  shgc=st.slider("Window SHGC",.1,.9,.75);Ad=st.slider("Door m2",0.,6.,2.);Ud=st.slider("Door U value",.7,6.,3.)
  ach=st.slider("Air changes per hour",.05,3.,.35);equipment=st.slider("Equipment kW",.1,10.,2.)
- ghi=st.slider("Peak solar W/m2",0.,1100.,800)
+ ghi=st.slider("Peak solar W/m2",0.0,1100.0,800.0)
  acx=st.slider("AC X m",0.,float(L),0.);acy=st.slider("AC Y m",0.,float(W),float(W/2))
  rx=st.slider("Relay X m",0.,float(L),float(L*.8));ry=st.slider("Relay Y m",0.,float(W),float(W/2))
  tariff=st.number_input("Import Rs/kWh",value=8.);export=st.number_input("Export Rs/kWh",value=2.)
