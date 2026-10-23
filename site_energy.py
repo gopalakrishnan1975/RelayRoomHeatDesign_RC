@@ -8,7 +8,7 @@ import pandas as pd
 
 ROOM_DEFAULT = dict(Room='Room 1',Length_m=8.,Width_m=5.,Height_m=3.,Window_m2=3.,Door_m2=2.,Equipment_kW=2.,People=0,Occupancy='Always',Target_C=21.,AC_units=3,AC_TR_each=4.)
 CIRCUIT_DEFAULT = dict(Load='Room lights',Room='Room 1',Type='Light',Count=4,Watts_each=20.,Schedule='Night')
-SCHEDULES=['Always','Daylight','Night','Occupied hours','Off']
+SCHEDULES=['Always','Daylight','Night','Occupied hours','Meal hours','Off']
 
 def validate_rooms(rooms,circuits):
     if rooms.empty: raise ValueError('Add at least one room')
@@ -17,11 +17,14 @@ def validate_rooms(rooms,circuits):
     numeric=[c for c in ROOM_DEFAULT if c not in ['Room','Occupancy']]
     vals=rooms[numeric].apply(pd.to_numeric,errors='coerce')
     if not np.isfinite(vals).all().all(): raise ValueError('Every room numeric input must be finite')
-    for c in ['Length_m','Width_m','Height_m','AC_TR_each']:
+    for c in ['Length_m','Width_m','Height_m']:
         if (vals[c]<=0).any():raise ValueError(c+' must be positive')
     if (vals[['Window_m2','Door_m2','Equipment_kW','People']]<0).any().any():raise ValueError('Room loads and openings cannot be negative')
-    if (vals.AC_units<2).any() or (vals.AC_units%1!=0).any() or (vals.People%1!=0).any():raise ValueError('Use integer people counts and at least two integer AC units for N+1')
+    enabled=rooms.get('AC_enabled',pd.Series(True,index=rooms.index)).astype(bool)
+    if (vals.loc[enabled,'AC_TR_each']<=0).any():raise ValueError('Conditioned rooms require positive AC capacity')
+    if (vals.loc[enabled,'AC_units']<2).any() or (vals.AC_units%1!=0).any() or (vals.People%1!=0).any():raise ValueError('Use integer people counts and at least two integer AC units for N+1')
     if not vals.Target_C.between(10,35).all():raise ValueError('Room target temperatures must be 10-35 C')
+    if 'Occupancy_fraction' in rooms and not rooms.Occupancy_fraction.between(0,1).all():raise ValueError('Occupancy fraction must be 0-1')
     if not rooms.Occupancy.isin(SCHEDULES).all():raise ValueError('Unknown occupancy schedule')
     walls=2*(vals.Length_m+vals.Width_m)*vals.Height_m
     if ((vals.Window_m2+vals.Door_m2)>walls).any():raise ValueError('Windows plus doors exceed gross wall area')
@@ -71,6 +74,7 @@ def schedule(frame,name,opening=8,closing=18):
     if name=='Night':return 1-daylight
     # Integer daily business-hour boundaries; overnight supported, equal = 24h.
     h=(end.dt.hour.to_numpy()-1)%24
+    if name=='Meal hours':return (((h>=6)&(h<9))|((h>=12)&(h<15))|((h>=19)&(h<22))).astype(float)
     return ((h>=opening)&(h<closing) if opening<closing else ((h>=opening)|(h<closing))).astype(float)
 
 def humidity_ratio(t,r):
@@ -83,9 +87,11 @@ def calculate(frame,rooms,circuits,p):
     rh=frame.relative_humidity_2m.to_numpy(float)/100;ghi=frame.shortwave_radiation.to_numpy(float)
     electrical={k:np.zeros(n) for k in ['Equipment kW','Lights kW','Fans kW','Other kW','AC kW']}
     room_loads={name:np.zeros(n) for name in rooms.Room};room_peak={name:0. for name in rooms.Room}
+    needed=set(rooms.Occupancy)|set(circuits.Schedule if not circuits.empty else [])
+    scheduled={name:schedule(frame,name,p['opening'],p['closing']) for name in needed}
     for row in circuits.to_dict('records'):
         watts=float(row['Count'])*float(row['Watts_each'])/1000
-        power=watts*schedule(frame,row['Schedule'],p['opening'],p['closing'])
+        power=watts*scheduled[row['Schedule']]
         key={'Light':'Lights kW','Fan':'Fans kW','Other':'Other kW'}[row['Type']]
         electrical[key]+=power
         if row['Room'] in room_loads:
@@ -99,19 +105,24 @@ def calculate(frame,rooms,circuits,p):
         solar=ghi*(p['roof_solar']*area+.0192*wall+room['Window_m2']*p['shgc'])/1000
         sensible=mdot*1.006*dt
         latent=np.maximum(0,mdot*2501*(humidity_ratio(t,rh)-humidity_ratio(sp,p['indoor_rh']/100)))
-        occupancy=schedule(frame,room['Occupancy'],p['opening'],p['closing'])
+        occupancy=scheduled[room['Occupancy']]*room.get('Occupancy_fraction',1.)
+        if room.get('Zone_type')=='Bedroom':
+            profile=np.asarray(p.get('sleeping_profile',[1.]*24),float)
+            if len(profile)!=24 or not np.isfinite(profile).all() or ((profile<0)|(profile>1)).any():raise ValueError('Sleeping profile needs 24 fractions in 0-1')
+            occupancy*=profile[(frame.time.dt.hour.to_numpy()-1)%24]
         people=room['People']*(p['person_sensible']+p['person_latent'])/1000
         equipment=np.full(n,room['Equipment_kW'])
         total=envelope+solar+sensible+latent+equipment+people*occupancy+room_loads[name]
         # Capacity selection assumes full stated occupancy and all connected in-room loads.
         design=envelope+solar+sensible+latent+equipment+people+room_peak[name]
         idx=int(np.argmax(design));required=float(design[idx])*(1+p['margin']/100)
-        available=room['AC_TR_each']*3.517*p['derating']*(room['AC_units']-1)
+        conditioned=bool(room.get('AC_enabled',True))
+        available=room['AC_TR_each']*3.517*p['derating']*(room['AC_units']-1) if conditioned else 0.
         cop=np.maximum(1.,p['cop']-p['cop_slope']*np.maximum(0,t-35))
-        electrical['Equipment kW']+=equipment;electrical['AC kW']+=total/cop
-        thermal_total+=total
-        summaries.append({'Room':name,'Design cooling kW':required,'Nominal TR needed/unit':required/((room['AC_units']-1)*3.517*p['derating']),
-            'Largest-unit-out kW':available,'N+1': 'PASS' if available>=required else 'FAIL',
+        electrical['Equipment kW']+=equipment;electrical['AC kW']+=total/cop if conditioned else 0.
+        thermal_total+=total if conditioned else 0.
+        summaries.append({'Room':name,'Design cooling kW':required if conditioned else 0.,'Nominal TR needed/unit':required/((room['AC_units']-1)*3.517*p['derating']) if conditioned else 0.,
+            'Largest-unit-out kW':available,'N+1': ('PASS' if available>=required else 'FAIL') if conditioned else 'Not conditioned',
             'Governing hour IST':str(frame.time.iloc[idx]),'Dry bulb C':t[idx],'RH %':rh[idx]*100,'GHI W/m2':ghi[idx]})
         for source,value in [('Envelope',envelope[idx]),('Solar',solar[idx]),('Infiltration sensible',sensible[idx]),('Infiltration latent',latent[idx]),('Equipment',equipment[idx]),('People sensible',room['People']*p['person_sensible']/1000),('People latent',room['People']*p['person_latent']/1000),('Lights/fans/other',room_peak[name])]:
             component_peaks.append({'Room':name,'Source':source,'Governing heat kW':value})
