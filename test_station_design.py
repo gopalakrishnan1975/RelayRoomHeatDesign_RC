@@ -60,3 +60,15 @@ def test_running_guest_pool_not_double_counted():
  p=params();p.update(running_peak_guests=16,sleeping_profile=[1.]*24)
  _,h,_=calculate(fixture(),r,c,p)
  assert np.allclose(h['Guests accounted for'],16)
+
+def test_restored_tariff_replaces_unsaved_widget_value():
+ from streamlit.testing.v1 import AppTest
+ from pathlib import Path
+ at=AppTest.from_file(str(Path(__file__).with_name('app.py')),default_timeout=60).run()
+ next(x for x in at.number_input if x.label=='Base import Rs/kWh').set_value(17.).run()
+ at.session_state['restored_payload']={'assumptions':{'tariff':8.},'code':'SC','station':'Secunderabad'}
+ at.session_state['restore_epoch']=1
+ at.run()
+ assert not at.exception
+ assert next(x for x in at.number_input if x.label=='Base import Rs/kWh').value==8.
+ assert next(x for x in at.text_input if x.label=='Station code').value=='SC'
