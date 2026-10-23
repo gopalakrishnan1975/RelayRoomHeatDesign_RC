@@ -11,9 +11,12 @@ TEMPLATES = {
  "Running room": ([dict(Room='Running room',Length_m=12.,Width_m=10.,Height_m=3.2,Window_m2=18.,Door_m2=6.,Equipment_kW=2.,People=18,Target_C=25.,Occupancy='Always')], [('Running room lights','Running room','Light',18,15,'Night'),('Running room fans','Running room','Fan',10,60,'Always')]),
  "Kitchen": ([dict(Room='Kitchen',Length_m=9.,Width_m=7.,Height_m=3.5,Window_m2=5.,Door_m2=5.,Equipment_kW=12.,People=8,Target_C=26.,Occupancy='Occupied hours')], [('Kitchen lights','Kitchen','Light',12,20,'Occupied hours'),('Kitchen exhaust','Kitchen','Fan',3,500,'Occupied hours')]),
  "Food stall": ([dict(Room='Food stall',Length_m=5.,Width_m=3.,Height_m=3.,Window_m2=2.,Door_m2=3.,Equipment_kW=4.,People=4,Target_C=26.,Occupancy='Occupied hours')], [('Food stall lights','Food stall','Light',8,15,'Occupied hours'),('Food stall fans','Food stall','Fan',2,75,'Occupied hours')]),
- "High mast lights": ([dict(Room='Unconditioned electrical kiosk - REMOVE AC FOR FINAL DESIGN',Length_m=3.,Width_m=3.,Height_m=3.,Window_m2=0.,Door_m2=2.,Equipment_kW=0.,People=0,Target_C=30.,Occupancy='Off')], [('High mast luminaires','Site exterior','Light',12,200,'Night')]),
+ "High mast lights": ([dict(Room='Unconditioned electrical kiosk - REMOVE AC FOR FINAL DESIGN',Length_m=3.,Width_m=3.,Height_m=3.,Window_m2=0.,Door_m2=2.,Equipment_kW=0.,People=0,Target_C=30.,Occupancy='Off',AC_enabled=False)], [('High mast luminaires','Site exterior','Light',12,200,'Night')]),
 }
 def template_data(name):
+    if name=='Running room':
+        from station_design import running_room
+        return running_room()
     rooms, loads=TEMPLATES[name]
     r=pd.DataFrame([dict(ROOM_DEFAULT,**item) for item in rooms]) if rooms else pd.DataFrame([ROOM_DEFAULT])
     c=pd.DataFrame([dict(Load=label,Room=room,Type=kind,Count=count,Watts_each=watts,Schedule=sched) for label,room,kind,count,watts,sched in loads])
@@ -31,7 +34,7 @@ def transformer_design(peak_kw, pv_kwp, power_factor=.9, utilization=.8, reserve
     selected=next((x for x in STANDARD_KVA if x>=required),None)
     return dict(import_design_kva=import_kva,export_design_kva=export_kva,required_kva=required,standard_kva=selected,oversize_warning=selected is None)
 
-def battery_dispatch(hourly,pv_kwp,capacity_kwh,power_kw,roundtrip_eff=.9,initial_soc=.5,min_soc=.1,max_soc=.9):
+def battery_dispatch(hourly,pv_kwp,capacity_kwh,power_kw,roundtrip_eff=.9,initial_soc=.1,min_soc=.1,max_soc=.9):
     """Hourly self-consumption dispatch: charge from surplus PV, discharge against load.
     No grid charging, time-of-use arbitrage, backup reserve or degradation model.
     """
