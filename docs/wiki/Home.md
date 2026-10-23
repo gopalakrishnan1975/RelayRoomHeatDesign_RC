@@ -1,12 +1,13 @@
-# Generic Room Heat Load and Site Energy Planner
+# Railway Facility Energy Design Studio
 
-Start with the [current integrated manual](../Generic_Room_Site_Energy_Manual.md). The main app now exposes room geometry, total window/door areas, equipment and people in the main page, with multiple rooms, assigned fan/light circuits, sunrise/sunset schedules, historical extreme N+1 sizing, full-site demand and area-constrained PV life-cycle cost optimization.
+Current extension: [Running-room buildings, station design versions and grid commitment review](../Running_Room_Versions_Grid_Manual.md).
 
-The previous relay-room simulator remains available through the Calculator selector. Older wiki pages below describe that preserved calculator, not the new default planner:
+Running rooms are individual bedrooms plus kitchen, dining, lobby, bathrooms, laundry and corridors. Use peak guests/staff and sleeping profiles, with conservative full-zone AC design occupancy. Non-conditioned services contribute electricity without artificial AC load.
 
-- [Relay quick start](Quick-Start.md)
-- [Relay thermal model](Thermal-Model.md)
-- [Relay hourly temperature scheduler](Hourly-Optimization.md)
-- [Historical extreme and redundancy background](Extreme-Design-and-Redundancy.md)
+Station revisions are immutable downloadable JSON snapshots with parent hashes; retain files per station and upload/restore them for the next revision. No central authenticated registry or automatic OneDrive sync is enabled.
 
-No physical control, certified HVAC design or CFD is implemented. Verify site geometry, equipment limits, construction, COP and derating before procurement.
+Use actual interval-demand CSV and applicable demand-charge rules for grid-contract comparisons. Simulated hourly demand is planning evidence only, not authorization to reduce a contract. The app does not submit utility changes.
+
+[Generic thermal and site-energy manual](../Generic_Room_Site_Energy_Manual.md) | [Historical extreme sizing](Extreme-Design-and-Redundancy.md)
+
+Earlier relay-specific quick-start/physics/scheduler pages describe the preserved Previous relay-room simulator. Engineering screening is not certified HVAC/protection design or physical control.
