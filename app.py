@@ -90,7 +90,7 @@ if st.session_state.get('active_template')=='Running room':
   loaded.pop('rooms',None);loaded.pop('circuits',None)
  st.caption('Changing the building programme regenerates room and circuit rows; review any manual zone edits again.')
  base,template_circuits=running_room(bedrooms,beds,guests,staff,cooking,waterheat,laundry)
- st.caption(f'Bed capacity {bedrooms*beds}; peak guests {guests}. Bedrooms are sized at full permitted occupancy; energy uses {guests/(bedrooms*beds):.0%} of bed capacity at peak. Shared-space counts are separate simultaneous zones; people heat in shared areas is conservative and may overlap sleeping occupants. Kitchen, baths, laundry and corridors start unconditioned; edit if required. Meal hours: 06-09, 12-15, 19-22 IST. Cooking and exhaust are scheduled; refrigeration is continuous.')
+ st.caption(f'Bed capacity {bedrooms*beds}; peak guests {guests}. Bedrooms are sized at full permitted occupancy; energy uses {guests/(bedrooms*beds):.0%} of bed capacity at peak. For operating energy, guests assigned to dining/lobby/baths are removed from the bedroom pool; a person is not counted in two zones. Capacity design still checks full stated zone occupancy. Kitchen, baths, laundry and corridors start unconditioned; edit if required. Meal hours: 06-09, 12-15, 19-22 IST. Cooking and exhaust are scheduled; refrigeration is continuous.')
 if loaded.get('rooms'):
  base=pd.DataFrame(loaded['rooms']);template_circuits=pd.DataFrame(loaded['circuits'])
 
@@ -123,6 +123,7 @@ st.caption('Night means sunset to sunrise. Daylight means sunrise to sunset. Occ
 
 p=dict(opening=opening,closing=closing)
 if st.session_state.get('active_template')=='Running room':
+ p['running_peak_guests']=program['guests']
  with st.expander('Hourly sleeping occupancy as fraction of peak guests'):
   profile=st.data_editor(pd.DataFrame({'Hour start IST':range(24),'Fraction of peak':loaded.get('assumptions',{}).get('sleeping_profile',[1.]*24)}),hide_index=True,disabled=['Hour start IST'],key='sleep_profile')
   p['sleeping_profile']=profile['Fraction of peak'].tolist()
