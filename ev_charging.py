@@ -2,8 +2,13 @@
 import numpy as np
 import pandas as pd
 
-EV_DEFAULTS=[dict(Group='AC destination',Points=0,Grid_kW_per_point=7.4,Efficiency=.90,Vehicles_per_day=0,Battery_kWh_per_vehicle=20.,Start_hour=8,End_hour=18),
-             dict(Group='DC fast (~60 kW delivered)',Points=0,Grid_kW_per_point=64.,Efficiency=.94,Vehicles_per_day=0,Battery_kWh_per_vehicle=30.,Start_hour=0,End_hour=0)]
+# Example vehicle categories and charger mains input powers. All values editable.
+EV_DEFAULTS=[
+ dict(Group='Two-wheeler AC / slow',Points=0,Grid_kW_per_point=1.5,Efficiency=.88,Vehicles_per_day=0,Battery_kWh_per_vehicle=2.0,Start_hour=8,End_hour=18),
+ dict(Group='Four-wheeler DC fast',Points=0,Grid_kW_per_point=64.,Efficiency=.94,Vehicles_per_day=0,Battery_kWh_per_vehicle=30.,Start_hour=0,End_hour=0),
+ dict(Group='Four-wheeler AC destination',Points=0,Grid_kW_per_point=7.4,Efficiency=.90,Vehicles_per_day=0,Battery_kWh_per_vehicle=20.,Start_hour=8,End_hour=18),
+ dict(Group='Two-wheeler higher-power / swapping station',Points=0,Grid_kW_per_point=3.3,Efficiency=.88,Vehicles_per_day=0,Battery_kWh_per_vehicle=2.5,Start_hour=8,End_hour=22),
+]
 
 def charging_profile(hourly,groups,reference_pv_kwp,p,managed=False,site_import_ceiling_kw=100.):
     numeric=['Points','Grid_kW_per_point','Efficiency','Vehicles_per_day','Battery_kWh_per_vehicle','Start_hour','End_hour']
