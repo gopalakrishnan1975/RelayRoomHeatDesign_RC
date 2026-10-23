@@ -185,9 +185,9 @@ for hour in range(23, -1, -1):
 rows = []
 previous = float(states[start_idx])
 for hour, setting in enumerate(schedule):
-    _, cooling, power, imports, exports = transition(hour, previous, setting)
+    _, cooling, dyn_power, imports, exports = transition(hour, previous, setting)
     rows.append({"Hour": hour, "Room setpoint C": setting, "Outside temperature C": temp[hour],
-                 "Cooling load kW": cooling, "AC power kW": power,
+                 "Cooling load kW": cooling, "AC power kW": dyn_power,
                  "Solar generation kW": pv_output[hour], "Grid import kW": imports,
                  "Grid export kW": exports})
     previous = setting
