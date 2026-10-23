@@ -11,7 +11,7 @@ def test_weather_report_and_temperature_bounds():
         'temperature_2m': [30.] * 24, 'relative_humidity_2m': [55.] * 24,
         'shortwave_radiation': [max(0,800*(1-abs(h-12)/6)) for h in range(24)]}}
     with patch('urllib.request.urlopen', return_value=io.BytesIO(json.dumps(fixture).encode())):
-        at = AppTest.from_file(str(Path(__file__).with_name('app.py')), default_timeout=60).run()
+        at = AppTest.from_file(str(Path(__file__).with_name('legacy_app.py')), default_timeout=60).run()
     assert not at.exception
     assert not at.error
     assert len(at.get('download_button')) == 5
