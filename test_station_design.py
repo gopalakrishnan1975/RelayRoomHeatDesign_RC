@@ -54,3 +54,9 @@ def test_battery_does_not_supply_free_initial_energy():
  h=pd.DataFrame({'Total demand kW':[10.,10.],'GHI W/m2':[0.,0.]})
  d=battery_dispatch(h,0,20,10)
  assert np.allclose(d['Grid import kW'],10.)
+
+def test_running_guest_pool_not_double_counted():
+ r,c=running_room(10,2,16)
+ p=params();p.update(running_peak_guests=16,sleeping_profile=[1.]*24)
+ _,h,_=calculate(fixture(),r,c,p)
+ assert np.allclose(h['Guests accounted for'],16)
