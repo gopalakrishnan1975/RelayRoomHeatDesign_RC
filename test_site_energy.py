@@ -43,3 +43,16 @@ def test_geometry_rejected():
  import pytest
  r=pd.DataFrame([dict(ROOM_DEFAULT,Window_m2=10000)])
  with pytest.raises(ValueError,match='exceed'):calculate(fixture(),r,pd.DataFrame(),params())
+
+def test_generic_ui_exports_with_cached_weather():
+ from datetime import datetime
+ from pathlib import Path
+ from streamlit.testing.v1 import AppTest
+ at=AppTest.from_file(str(Path(__file__).with_name('app.py')),default_timeout=60).run()
+ assert not at.exception
+ last=datetime.now().year-1
+ at.session_state['site_weather']=((18.872,79.444,last-29,last,'Historical extreme design + annual energy'),fixture(),{'source':'controlled test fixture','urls':[],'retrieved_utc':'test'})
+ at.run(timeout=60)
+ assert not at.exception,list(at.exception)
+ assert len(at.metric)==4
+ assert len(at.get('download_button'))==3
