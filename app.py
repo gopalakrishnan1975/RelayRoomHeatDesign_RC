@@ -47,6 +47,8 @@ base=pd.DataFrame([ROOM_DEFAULT])
 essential=['Room','Length_m','Width_m','Height_m','Window_m2','Door_m2','Equipment_kW','People']
 rooms_basic=st.data_editor(base[essential],num_rows='dynamic',hide_index=True,key='rooms',width='stretch',
  column_config={'People':st.column_config.NumberColumn(min_value=0,step=1),'Room':st.column_config.TextColumn(required=True)})
+if rooms_basic.empty:
+ st.info('Add at least one room to continue.');st.stop()
 st.subheader('3. Room temperature, occupancy and AC configuration')
 st.caption('Target_C is the room/critical-equipment upper temperature used for sizing. AC_units includes the standby unit. Set approved limits for each room; 21 C is only the relay-room starting example.')
 saved_settings=st.session_state.get('saved_room_settings',{})
@@ -151,8 +153,10 @@ def report_pdf():
   story.append(PageBreak());text(title,'Heading1')
   frame=frame.copy()
   for offset in range(1,len(frame.columns),3):
-   part=frame.iloc[:,[0]+list(range(offset,min(offset+3,len(frame.columns))))]
-   rows=[[Paragraph(escape(str(x)),styles['BodyText']) for x in part.columns]]+[[Paragraph(escape(str(x)),styles['BodyText']) for x in row] for row in part.round(3).values.tolist()]
+   part=frame.iloc[:,[0]+list(range(offset,min(offset+3,len(frame.columns))))].copy()
+   numeric=part.select_dtypes(include='number').columns
+   part[numeric]=part[numeric].round(3)
+   rows=[[Paragraph(escape(str(x)),styles['BodyText']) for x in part.columns]]+[[Paragraph(escape(str(x)),styles['BodyText']) for x in row] for row in part.values.tolist()]
    tb=LongTable(rows,repeatRows=1,colWidths=[125]*len(part.columns));tb.setStyle([('GRID',(0,0),(-1,-1),.3,colors.grey),('BACKGROUND',(0,0),(-1,0),colors.whitesmoke),('VALIGN',(0,0),(-1,-1),'TOP')]);story.extend([tb,Spacer(1,10)])
  text('Generic Room Heat Load and Site Energy Design','Title');text(f'{station} ({code}) | {latitude}, {longitude} | {basis}')
  text('Generated UTC '+datetime.now(timezone.utc).isoformat());text(f"Period: {f.time.iloc[0]} to {f.time.iloc[-1]}; {len(f):,} hourly records; Asia/Kolkata")
