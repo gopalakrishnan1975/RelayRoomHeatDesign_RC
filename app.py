@@ -49,9 +49,11 @@ rooms_basic=st.data_editor(base[essential],num_rows='dynamic',hide_index=True,ke
  column_config={'People':st.column_config.NumberColumn(min_value=0,step=1),'Room':st.column_config.TextColumn(required=True)})
 st.subheader('3. Room temperature, occupancy and AC configuration')
 st.caption('Target_C is the room/critical-equipment upper temperature used for sizing. AC_units includes the standby unit. Set approved limits for each room; 21 C is only the relay-room starting example.')
-settings=pd.DataFrame([{'Room':r,'Target_C':21.,'Occupancy':'Always','AC_units':3,'AC_TR_each':4.} for r in rooms_basic.Room.dropna()])
+saved_settings=st.session_state.get('saved_room_settings',{})
+settings=pd.DataFrame([dict({'Room':r,'Target_C':21.,'Occupancy':'Always','AC_units':3,'AC_TR_each':4.},**saved_settings.get(r,{})) for r in rooms_basic.Room.dropna()])
 settings=st.data_editor(settings,hide_index=True,disabled=['Room'],key='room_settings',width='stretch',
  column_config={'Occupancy':st.column_config.SelectboxColumn(options=SCHEDULES,required=True),'AC_units':st.column_config.NumberColumn(min_value=2,step=1)})
+st.session_state['saved_room_settings']={row['Room']:row for row in settings.to_dict('records')}
 rooms=rooms_basic.merge(settings,on='Room',how='left')
 st.subheader('4. Fans, lights and additional electrical loads')
 st.caption('Assign each circuit to its room so its heat is included there. Use Site exterior for outdoor lighting or loads outside conditioned rooms. Enter each load only once; do not repeat it in Equipment_kW.')
