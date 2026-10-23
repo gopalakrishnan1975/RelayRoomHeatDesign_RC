@@ -2,15 +2,59 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import plotly.express as px
+import json
+from urllib.request import urlopen
+from urllib.parse import urlencode
+from datetime import datetime, timezone
+from io import BytesIO
+from xml.sax.saxutils import escape
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, LongTable, PageBreak
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib import colors
+
+@st.cache_data(ttl=3600)
+def weather_data(latitude, longitude):
+    params = dict(latitude=latitude, longitude=longitude, timezone="Asia/Kolkata",
+                  forecast_days=1, hourly="temperature_2m,relative_humidity_2m,shortwave_radiation")
+    url = "https://api.open-meteo.com/v1/forecast?" + urlencode(params)
+    with urlopen(url, timeout=20) as response:
+        data = json.load(response)
+    hourly = pd.DataFrame(data["hourly"])
+    columns = ["temperature_2m", "relative_humidity_2m", "shortwave_radiation"]
+    if len(hourly) != 24 or hourly[columns].isna().any().any() or not np.isfinite(hourly[columns]).all().all():
+        raise ValueError("Expected 24 complete finite hourly weather records")
+    if not hourly.relative_humidity_2m.between(0,100).all() or (hourly.shortwave_radiation < 0).any():
+        raise ValueError("Weather values outside physical range")
+    return hourly, url, datetime.now(timezone.utc).isoformat()
+
 
 st.set_page_config(page_title="Relay Room Thermal + Solar",layout="wide")
 st.title("Interlocking Room | Thermal and Solar Simulator")
 st.caption("Preliminary heat-balance screening. Spatial heat map is an illustrative surrogate, NOT CFD.")
+cname, ccode = st.columns(2)
+station_name = cname.text_input("Station name", "Mancherial")
+station_code = ccode.text_input("Station code", "MCI")
+st.caption("Coordinates determine weather. Mancherial defaults are approximate; verify the relay-room location. Station code is a report identifier, not an automatic location lookup.")
+clat, clon = st.columns(2)
+latitude = clat.number_input("Station latitude", min_value=-90.0, max_value=90.0, value=18.872, format="%.5f")
+longitude = clon.number_input("Station longitude", min_value=-180.0, max_value=180.0, value=79.444, format="%.5f")
+weather_mode = st.radio("Weather source", ["Open-Meteo forecast", "Synthetic demonstration"], horizontal=True)
+weather = None
+weather_source = "Synthetic demonstration"
+fetched_at = "Not applicable"
+if weather_mode == "Open-Meteo forecast":
+    try:
+        weather, weather_source, fetched_at = weather_data(latitude, longitude)
+        st.success("Open-Meteo forecast loaded: " + str(weather.time.iloc[0]) + " to " + str(weather.time.iloc[-1]) + " (Asia/Kolkata)")
+        st.caption("Modelled weather, not a sensor measurement. Source: Open-Meteo, https://open-meteo.com/ (CC BY 4.0). Cached for one hour; retrieved UTC: " + fetched_at)
+    except Exception as exc:
+        st.error("Weather unavailable: " + str(exc) + ". Retry later or explicitly select Synthetic demonstration.")
+        st.stop()
 with st.sidebar:
  L=st.slider("Length m",3.,20.,8.);W=st.slider("Width m",3.,15.,5.);H=st.slider("Height m",2.,6.,3.)
  T=st.slider("Outdoor peak temperature C",25.,50.,42.);target=st.slider("Manual relay-end air setpoint C",18.,30.,21.)
  min_target=st.slider("Minimum permitted relay-end temperature C",18.,30.,21.)
- max_target=st.slider("Maximum permitted relay-end temperature C",min_target,35.,max(26.,min_target))
+ max_target=st.slider("Maximum permitted relay-end temperature C",min_target,35.,min_target)
  pv_installed=st.slider("Installed solar PV kWp",0.,30.,8.)
  setpoint_step=st.select_slider("Optimization resolution C",options=[0.5,1.0],value=0.5)
  rh=st.slider("Outdoor RH %",10,95,55);rh_in=st.slider("Indoor RH %",35,65,50)
@@ -31,7 +75,7 @@ def w(t,r):
 def load(out,rhout,irr,roof=Uroof,window=Uw,solar=shgc,door=Ud,air=ach,setpoint=None):
  sp=target if setpoint is None else setpoint
  dt=max(0,out-sp)
- wall=2*(L+W)*H-Aw-Ad
+ wall=max(0.0,2*(L+W)*H-Aw-Ad)
  mdot=1.18*L*W*H*air/3600
  latent=max(0,mdot*2501*(w(out,rhout)-w(sp,rh_in/100)))
  terms={"Roof":roof*L*W*dt/1000,"Walls":Uwall*wall*dt/1000,
@@ -45,6 +89,14 @@ peak=1.15*sum(q.values())
 h=np.arange(24);temp=T-8+5*np.sin((h-9)*np.pi/12)
 sun=np.maximum(0,ghi*np.sin((h-6)*np.pi/12))
 rhhour=np.clip(rh/100-.12*np.sin((h-9)*np.pi/12),.1,.95)
+if weather is not None:
+ temp=weather.temperature_2m.to_numpy(dtype=float)
+ rhhour=weather.relative_humidity_2m.to_numpy(dtype=float)/100
+ sun=weather.shortwave_radiation.to_numpy(dtype=float)
+ T=float(temp.max()); ghi=float(sun.max())
+ q=load(float(temp[np.argmax(temp)]),float(rhhour[np.argmax(temp)]),float(sun[np.argmax(temp)]))
+ peak=1.15*max(sum(load(t,r,s).values()) for t,r,s in zip(temp,rhhour,sun))
+
 cool=np.array([1.15*sum(load(t,r,s).values()) for t,r,s in zip(temp,rhhour,sun)])
 electric=cool/np.maximum(2,3.5-.025*np.maximum(0,temp-35))
 pv=np.arange(0,20.25,.25)
@@ -86,7 +138,7 @@ fixed_components,fixed_thermal,fixed_power,_,fixed_import,_=simulate_setpoint(ta
 st.subheader("Adaptive hourly temperature schedule — research simulation")
 thermal_mass = st.slider("Effective thermal capacitance (kWh per deg C)", 0.5, 20.0, 4.0, 0.5)
 max_rate = st.slider("Maximum hourly setpoint movement (deg C)", 0.5, 4.0, 1.0, 0.5)
-start_temp = st.slider("Starting room temperature (deg C)", min_target, max_target, min_target, 0.5)
+start_temp = min_target if min_target == max_target else st.slider("Starting room temperature (deg C)", min_target, max_target, min_target, 0.5)
 dynamic_objective = st.selectbox("Hourly optimization objective", ["Minimum grid imports", "Minimum electricity cost"])
 states = np.round(np.arange(min_target, max_target + 0.001, 0.5), 2)
 start_idx = int(np.argmin(np.abs(states - start_temp)))
@@ -95,7 +147,10 @@ hour_cop = np.maximum(2.0, 3.5 - 0.025 * np.maximum(0, temp - 35))
 
 def transition(hour, previous, setting):
     gains = sum(load(float(temp[hour]), float(rhhour[hour]), float(sun[hour]), setpoint=float(setting)).values())
-    cooling = max(0.0, gains + thermal_mass * (previous - setting))
+    cooling = gains + thermal_mass * (previous - setting)
+    if cooling < -1e-9:
+        return np.inf, 0.0, 0.0, 0.0, 0.0
+    cooling = max(0.0, cooling)
     power = cooling / hour_cop[hour]
     imports = max(0.0, power - pv_output[hour])
     exports = max(0.0, pv_output[hour] - power)
@@ -120,6 +175,9 @@ for hour in range(24):
 
 # Close the daily cycle at its original temperature to avoid artificial savings.
 selected = start_idx
+if not np.isfinite(dp[24, selected]):
+    st.error("No feasible closed-cycle schedule. Review temperature constraints.")
+    st.stop()
 schedule = np.zeros(24)
 for hour in range(23, -1, -1):
     schedule[hour] = states[selected]
@@ -140,14 +198,14 @@ a1.metric("Adaptive grid imports", "%.1f kWh/day" % dynamic_table["Grid import k
 a2.metric("Fixed start-temperature imports", "%.1f kWh/day" % baseline_import)
 a3.metric("Estimated grid savings", "%.1f kWh/day" % (baseline_import - dynamic_table["Grid import kW"].sum()))
 st.plotly_chart(px.line(dynamic_table, x="Hour", y=["Room setpoint C", "Outside temperature C"],
-                        title="Hourly room temperature schedule"), use_container_width=True)
+                        title="Hourly room temperature schedule"), width="stretch")
 st.plotly_chart(px.line(dynamic_table, x="Hour",
                         y=["AC power kW", "Solar generation kW", "Grid import kW"],
-                        title="Hourly electricity balance"), use_container_width=True)
-st.dataframe(dynamic_table.round(2), hide_index=True, use_container_width=True)
+                        title="Hourly electricity balance"), width="stretch")
+st.dataframe(dynamic_table.round(2), hide_index=True, width="stretch")
 st.download_button("Download adaptive schedule CSV", dynamic_table.to_csv(index=False),
                    "adaptive_temperature_schedule.csv", mime="text/csv")
-st.warning("Illustrative lumped-capacitance model with synthetic weather, not a validated control algorithm. Follow approved relay and signalling-room temperature and humidity requirements. No direct control of AC or signalling equipment is implemented.")
+st.warning("Illustrative lumped-capacitance model with selected weather source, not a validated control algorithm. Follow approved relay and signalling-room temperature and humidity requirements. No direct control of AC or signalling equipment is implemented.")
 
 st.subheader("Energy balance and optimal AC temperature")
 k1,k2,k3,k4=st.columns(4)
@@ -163,13 +221,13 @@ energy=pd.DataFrame({"Hour":h,"Ambient °C":temp,"Outdoor RH %":rhhour*100,
  "Infiltration/other heat kW":components[["Infiltration sensible","Infiltration latent","Lighting"]].sum(axis=1),
  "Cooling load kW":thermal,"AC electric demand kW":power,
  "Solar PV generation kW":solar_generation,"Grid import kW":grid_import,"Grid export kW":grid_export})
-st.plotly_chart(px.line(energy,x="Hour",y=["Ambient °C"],title="Hourly ambient temperature"),use_container_width=True)
-st.plotly_chart(px.area(energy,x="Hour",y=["Equipment heat kW","Solar heat gain kW","Roof/wall/window/door heat kW","Infiltration/other heat kW"],title="Hourly heat-load contributions (kW)"),use_container_width=True)
-st.plotly_chart(px.line(energy,x="Hour",y=["Cooling load kW","AC electric demand kW","Solar PV generation kW","Grid import kW"],title="Thermal load, electrical load, PV and grid import"),use_container_width=True)
-st.plotly_chart(px.line(comparison,x="Setpoint C",y=["Grid import kWh/day","AC electricity kWh/day","Cooling kWh/day"],title="Setpoint optimization: daily energy versus permitted temperature"),use_container_width=True)
+st.plotly_chart(px.line(energy,x="Hour",y=["Ambient °C"],title="Hourly ambient temperature"),width="stretch")
+st.plotly_chart(px.area(energy,x="Hour",y=["Equipment heat kW","Solar heat gain kW","Roof/wall/window/door heat kW","Infiltration/other heat kW"],title="Hourly heat-load contributions (kW)"),width="stretch")
+st.plotly_chart(px.line(energy,x="Hour",y=["Cooling load kW","AC electric demand kW","Solar PV generation kW","Grid import kW"],title="Thermal load, electrical load, PV and grid import"),width="stretch")
+st.plotly_chart(px.line(comparison,x="Setpoint C",y=["Grid import kWh/day","AC electricity kWh/day","Cooling kWh/day"],title="Setpoint optimization: daily energy versus permitted temperature"),width="stretch")
 st.download_button("Download optimized hourly energy balance CSV",energy.to_csv(index=False),"relay_room_hourly_energy.csv",mime="text/csv")
 st.download_button("Download setpoint optimization CSV",comparison.to_csv(index=False),"setpoint_optimization.csv",mime="text/csv")
-st.info("Synthetic weather/insolation: representative day only. Cooling thermal kWh and electrical kWh are different. Grid imports use hourly coincidence without storage. Real sizing requires hourly measured/weather data, equipment limits, humidity control, cycling/part-load COP and reliability validation.")
+st.info("Selected day weather: preliminary screening only. Cooling thermal kWh and electrical kWh are different. Grid imports use hourly coincidence without storage. Real sizing requires hourly measured/weather data, equipment limits, humidity control, cycling/part-load COP and reliability validation.")
 
 a,b,c=st.columns(3)
 a.metric("Peak thermal kW (+15%)",f"{peak:.2f}")
@@ -185,7 +243,7 @@ with tab1:
  fig=px.imshow(Z,x=x,y=y,origin="lower",aspect="auto",color_continuous_scale="RdYlBu_r",labels={"color":"°C"})
  fig.add_scatter(x=[acx],y=[acy],mode="markers",name="AC",marker=dict(size=12))
  fig.add_scatter(x=[rx],y=[ry],mode="markers",name="Relay",marker=dict(size=12))
- st.plotly_chart(fig,use_container_width=True)
+ st.plotly_chart(fig,width="stretch")
 with tab2:
  rows=[{"Outdoor RH %":r,"Peak cooling kW":1.15*sum(load(T,r/100,ghi).values())} for r in range(20,100,10)]
  st.line_chart(pd.DataFrame(rows).set_index("Outdoor RH %"))
@@ -195,4 +253,47 @@ with tab3:
  st.line_chart(hourly.set_index("hour"))
  st.line_chart(pd.DataFrame({"PV kWp":pv,"NPV Rs proxy":benefit}).set_index("PV kWp"))
  st.download_button("Download hourly CSV",hourly.to_csv(index=False),"hourly.csv")
- st.warning("Synthetic 24-hour weather repeated 365 times; not real hourly insolation or investment-grade sizing. Verify with site 8760-hour GHI/DNI/DHI, shading and tariff data. Check redundancy and signalling safety.")
+ st.warning("Selected 24-hour weather repeated 365 times; not real hourly insolation or investment-grade sizing. Verify with site 8760-hour GHI/DNI/DHI, shading and tariff data. Check redundancy and signalling safety.")
+
+
+st.subheader("Complete design report")
+def build_report():
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, rightMargin=32, leftMargin=32)
+    styles = getSampleStyleSheet()
+    story = [Paragraph("Relay Room Thermal and Solar Design Report", styles["Title"])]
+    def text(value):
+        story.append(Paragraph(escape(str(value)), styles["BodyText"]))
+        story.append(Spacer(1,6))
+    text(f"Station: {station_name} ({station_code}); coordinates: {latitude}, {longitude}")
+    text("Generated UTC: " + datetime.now(timezone.utc).isoformat())
+    text("Weather source: " + weather_source + "; retrieved: " + fetched_at)
+    text("Weather hours use Asia/Kolkata. Open-Meteo modelled forecast; attribution: https://open-meteo.com/, CC BY 4.0.")
+    text("Preliminary screening only. Relay-end upper limit defaults to 21 C. The spatial map is illustrative, not CFD; forecast-day annualization is not investment-grade sizing. No AC control is implemented. Actual AC capacity and humidity dynamics are not modelled.")
+    inputs = {key:globals()[key] for key in ["L","W","H","T","target","min_target","max_target","pv_installed","setpoint_step","rh","rh_in","Uroof","Uwall","Aw","Uw","shgc","Ad","Ud","ach","equipment","ghi","acx","acy","rx","ry","tariff","export","capex","thermal_mass","max_rate","start_temp","dynamic_objective"]}
+    story.append(Paragraph("Inputs (units match application labels)",styles["Heading1"]))
+    for key,value in inputs.items(): text(f"{key}: {value}")
+    text(f"Peak design cooling including 15% allowance: {peak:.3f} kW; {peak/3.517:.3f} TR")
+    text(f"Illustrative PV economic optimum: {best:.2f} kWp; fixed optimum: {opt_sp:.1f} C")
+    text(f"Adaptive import: {dynamic_table['Grid import kW'].sum():.3f} kWh; baseline import: {baseline_import:.3f} kWh")
+    def table(title, frame):
+        story.append(PageBreak())
+        story.append(Paragraph(title,styles["Heading1"]))
+        # Split wide tables into readable groups, repeating the time/key column.
+        for offset in range(1,len(frame.columns),4):
+            part=frame.iloc[:,[0]+list(range(offset,min(offset+4,len(frame.columns))))].round(3)
+            rows=[[Paragraph(escape(str(c)),styles["BodyText"]) for c in part.columns]]+part.astype(str).values.tolist()
+            t=LongTable(rows,repeatRows=1,colWidths=[100]*len(part.columns))
+            t.setStyle([("GRID",(0,0),(-1,-1),.3,colors.grey),("FONTSIZE",(0,1),(-1,-1),7),("BACKGROUND",(0,0),(-1,0),colors.whitesmoke)])
+            story.extend([t,Spacer(1,12)])
+    if weather is not None: table("Hourly weather inputs",weather)
+    table("Adaptive hourly results",dynamic_table)
+    table("Heat load at peak ambient hour",pd.DataFrame({"Source":list(q),"kW":list(q.values())}))
+    table("Humidity sensitivity",pd.DataFrame(rows))
+    table("Fixed optimal setpoint energy and heat contributions",energy)
+    table("Setpoint alternatives",comparison)
+    table("PV economic alternatives (single-day annualization)",pd.DataFrame({"PV kWp":pv,"NPV Rs proxy":benefit}))
+    text("Model: envelope UA delta-T + equipment + lighting + solar surrogate + sensible and latent infiltration. AC electricity = cooling/COP; PV = kWp x GHI/1000 x 0.78. Dynamic programming minimizes imports or cost with thermal capacitance, rate bounds and equal starting/ending temperature. Negative cooling transitions are rejected. No battery is modelled.")
+    doc.build(story)
+    return buffer.getvalue()
+st.download_button("Download complete design report PDF", build_report(), "relay_room_design_report.pdf", mime="application/pdf")
