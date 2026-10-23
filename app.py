@@ -22,6 +22,13 @@ if mode=='Previous relay-room simulator':
  runpy.run_path('legacy_app.py',run_name='__main__')
  st.stop()
 
+def number_input(label,*args,**kwargs):
+ kwargs['key']=str(kwargs.get('key',label))+'_restore_'+str(st.session_state.get('restore_epoch',0))
+ return st.number_input(label,*args,**kwargs)
+def text_input(label,*args,**kwargs):
+ kwargs['key']=str(kwargs.get('key',label))+'_restore_'+str(st.session_state.get('restore_epoch',0))
+ return st.text_input(label,*args,**kwargs)
+
 st.subheader('Station-specific design versions')
 st.caption('Each revision has a station code, revision number, parent hash and all inputs. Download it to your station folder/OneDrive and upload it here to revise later. Streamlit session storage is temporary; files are not automatically written to a central registry.')
 version_file=st.file_uploader('Load a saved station design revision JSON',type=['json'])
@@ -32,6 +39,7 @@ if st.button('Restore station design'):
   if not isinstance(restored.get('payload'),dict) or not all(k in restored['payload'] for k in ['rooms','circuits','station','code','assumptions']):raise ValueError('Design payload is incomplete')
   st.session_state['restored_payload']=restored['payload'];st.session_state['parent_revision']=restored
   st.session_state['program_applied']=restored['payload'].get('running_room_program',{})
+  st.session_state['restore_epoch']=st.session_state.get('restore_epoch',0)+1
   st.session_state['active_template']=restored['payload'].get('facility_template','Custom / blank')
   st.session_state['template_version']=st.session_state.get('template_version',0)+1
   st.session_state.pop('saved_room_settings',None)
@@ -45,11 +53,11 @@ a,b,c,d=st.columns(4)
 station=a.text_input('Station / site name',loaded.get('station','Mancherial'));code=b.text_input('Station code',loaded.get('code','MCI'))
 latitude=c.number_input('Latitude',-90.,90.,loaded.get('latitude',18.872),format='%.5f');longitude=d.number_input('Longitude',-180.,180.,loaded.get('longitude',79.444),format='%.5f')
 st.caption('Changing name/code does not change coordinates. Current scheduling timezone is Asia/Kolkata (India).')
-basis=st.radio('Analysis basis',['Historical extreme design + annual energy','Forecast day (operations only)'],horizontal=True,index=0 if loaded.get('basis','Historical').startswith('Historical') else 1)
+basis=st.radio('Analysis basis',['Historical extreme design + annual energy','Forecast day (operations only)'],horizontal=True,key='basis_'+str(st.session_state.get('restore_epoch',0)),index=0 if loaded.get('basis','Historical').startswith('Historical') else 1)
 last_year=datetime.now(timezone.utc).year-1
 first,last=st.columns(2)
-start_year=int(first.number_input('Historical start year',1940,last_year,loaded.get('start_year',last_year-29)))
-end_year=int(last.number_input('Historical end year',1940,last_year,loaded.get('end_year',last_year)))
+start_year=int(firnumber_input('Historical start year',1940,last_year,loaded.get('start_year',last_year-29)))
+end_year=int(lanumber_input('Historical end year',1940,last_year,loaded.get('end_year',last_year)))
 key=(latitude,longitude,start_year,end_year,basis)
 @st.cache_data(ttl=86400,show_spinner=False)
 def cached_weather(lat,lon,first,last,basis):
@@ -106,7 +114,7 @@ st.caption('Target_C is the room/critical-equipment upper temperature used for s
 saved_settings=st.session_state.get('saved_room_settings',{})
 template_settings={row['Room']:row for row in base.to_dict('records')}
 settings=pd.DataFrame([dict({'Room':r,'Target_C':21.,'Occupancy':'Always','AC_units':3,'AC_TR_each':4.,'AC_enabled':True,'Zone_type':'Generic','Occupancy_fraction':1.},**({k:v for k,v in template_settings.get(r,{}).items() if k not in essential or k=='Room'}|saved_settings.get(r,{}))) for r in rooms_basic.Room.dropna()])
-settings=st.data_editor(settings,hide_index=True,disabled=['Room'],key='room_settings',width='stretch',
+settings=st.data_editor(settings,hide_index=True,disabled=['Room'],key=f"room_settings_{st.session_state.get('template_version',0)}",width='stretch',
  column_config={'Occupancy':st.column_config.SelectboxColumn(options=SCHEDULES,required=True),'AC_units':st.column_config.NumberColumn(min_value=2,step=1)})
 st.session_state['saved_room_settings']={row['Room']:row for row in settings.to_dict('records')}
 rooms=rooms_basic.merge(settings,on='Room',how='left')
@@ -125,12 +133,12 @@ p=dict(opening=opening,closing=closing)
 if st.session_state.get('active_template')=='Running room':
  p['running_peak_guests']=program['guests']
  with st.expander('Hourly sleeping occupancy as fraction of peak guests'):
-  profile=st.data_editor(pd.DataFrame({'Hour start IST':range(24),'Fraction of peak':loaded.get('assumptions',{}).get('sleeping_profile',[1.]*24)}),hide_index=True,disabled=['Hour start IST'],key='sleep_profile')
+  profile=st.data_editor(pd.DataFrame({'Hour start IST':range(24),'Fraction of peak':loaded.get('assumptions',{}).get('sleeping_profile',[1.]*24)}),hide_index=True,disabled=['Hour start IST'],key=f"sleep_profile_{st.session_state.get('template_version',0)}")
   p['sleeping_profile']=profile['Fraction of peak'].tolist()
 with st.expander('Engineering assumptions - review before equipment selection',expanded=False):
  st.caption('Shared envelope defaults apply to every room. No inter-room heat transfer, orientation-specific wall model or CFD. Room heat balance is a preliminary screening model.')
  for label,keyp,value in [('Roof U W/m2K','roof_u',2.5),('Wall U W/m2K','wall_u',1.8),('Window U W/m2K','window_u',5.7),('Door U W/m2K','door_u',3.),('Window solar heat gain coefficient','shgc',.75),('Effective roof solar gain factor','roof_solar',.15),('Air changes/hour','ach',.35),('Indoor RH %','indoor_rh',50.),('Sensible heat/person W','person_sensible',75.),('Latent heat/person W','person_latent',55.),('Design load allowance %','margin',15.),('AC available capacity fraction at extreme ambient','derating',.85),('AC COP at outdoor <=35 C','cop',3.5),('COP reduction per C above 35','cop_slope',.025),('Outdoor temperature stress uplift C','uplift',0.)]:
-  p[keyp]=st.number_input(label,min_value=0.0,value=float(loaded.get('assumptions',{}).get(keyp,value)),key=keyp)
+  p[keyp]=number_input(label,min_value=0.0,value=float(loaded.get('assumptions',{}).get(keyp,value)),key=keyp)
  st.caption('0.85 derating and COP curve are editable assumptions, not manufacturer certification. Full people and all connected in-room circuits are assumed for capacity design, regardless of operating schedule. Historical weather variables remain coincident; optional stress uplift holds RH constant.')
 
 st.subheader('5. Solar, transformer and optional BESS')
@@ -159,8 +167,8 @@ m2kw=b.number_input('Area required per kWp m2',min_value=1.,value=float(loaded.g
 installed=c.number_input('PV capacity to evaluate kWp',min_value=0.,value=float(loaded.get('evaluated_pv_kwp',4.)))
 with st.expander('Solar costing assumptions'):
  for label,k,val in [('PV installed cost Rs/kWp','pv_capex',50000.),('Annual PV O&M % of capex','om',1.),('Real discount rate %','discount',8.),('PV performance ratio','pv_pr',.78)]:
-  p[k]=st.number_input(label,min_value=0.,value=float(loaded.get('assumptions',{}).get(k,val)))
- p['life']=int(st.number_input('Economic horizon years',1,40,int(loaded.get('assumptions',{}).get('life',20))))
+  p[k]=number_input(label,min_value=0.,value=float(loaded.get('assumptions',{}).get(k,val)))
+ p['life']=int(number_input('Economic horizon years',1,40,int(loaded.get('assumptions',{}).get('life',20))))
 st.caption('Optimization selects PV capacity minimizing discounted grid cost + PV capex + O&M within available area, in 0.5 kWp steps plus the exact area limit. PV capacity is optimized without BESS; the entered battery is evaluated separately. Grid demand charges are compared separately below. No tariff escalation or PV degradation. GHI is a horizontal PV proxy; verify tilt, shade and equipment performance before procurement.')
 
 st.subheader('6. Grid capacity commitment and actual maximum demand')
@@ -175,7 +183,7 @@ a,b,c=st.columns(3)
 excess_rate=a.number_input('Additional excess-demand charge Rs/kVA/month',min_value=0.,value=float(grid_defaults.get('excess',0.)))
 contract_reserve=b.number_input('Peak demand reserve fraction',0.,1.,float(grid_defaults.get('reserve',.15)))
 contract_step=c.number_input('Contract comparison step kVA',min_value=1.,value=float(grid_defaults.get('step',5.)))
-restore_basis=st.checkbox('Model grid capacity without PV or BESS credit',value=bool(grid_defaults.get('no_generation_credit',True)))
+restore_basis=st.checkbox('Model grid capacity without PV or BESS credit',value=bool(grid_defaults.get('no_generation_credit',True)),key='credit_'+str(st.session_state.get('restore_epoch',0)))
 st.caption('Charges are user-defined screening rules, not a built-in utility tariff. Compare recorded demand, growth and seasonal peaks with the current contract; verify applicable category, billing minimum, ratchets, penalties and utility approval.')
 measured_monthly=pd.DataFrame(loaded['measured_monthly']) if loaded.get('measured_monthly') else None
 if meter_file is not None:
@@ -185,7 +193,7 @@ if meter_file is not None:
   st.caption('Meter demand includes whatever PV/BESS operated during measurement. Review generation outages, battery availability and future occupancy before proposing a reduced contract.')
   if len(measured_monthly)<12 or (measured_monthly['Coverage %']<95).any():st.warning('Less than 12 months or incomplete interval coverage: do not treat this sample as a proven annual peak. Annualized costs are indicative.')
  except Exception as exc:st.error('Meter data invalid: '+str(exc))
-label=st.text_input('Station design label',loaded.get('design_label','Facility energy design'))
+label=text_input('Station design label',loaded.get('design_label','Facility energy design'))
 notes=st.text_area('Revision notes')
 input_snapshot=dict(station=station,code=code,latitude=latitude,longitude=longitude,basis=basis,start_year=start_year,end_year=end_year,rooms=rooms.to_dict('records'),circuits=circuits.to_dict('records'),assumptions=p,solar_area_m2=roof_area,area_per_kwp=m2kw,evaluated_pv_kwp=installed,facility_template=st.session_state.get('active_template','Custom / blank'),running_room_program=program,design_label=label,measured_monthly=measured_monthly.to_dict('records') if measured_monthly is not None else None,
  transformer_settings=dict(power_factor=power_factor,utilization=transformer_util,reserve=transformer_reserve),bess_settings=dict(kwh=bess_kwh,kw=bess_kw,eff=bess_eff,capex=bess_capex,om=bess_om),grid_contract=dict(current=current_contract,rate=demand_rate,floor=min_fraction,excess=excess_rate,reserve=contract_reserve,step=contract_step,no_generation_credit=restore_basis))
