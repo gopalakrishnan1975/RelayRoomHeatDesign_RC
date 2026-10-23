@@ -1,15 +1,11 @@
-# Integrated technical, business, data, IT and user manual
+# Technical, business, data, IT and user manual
 
-Version 1.0 — 22 October 2026. The authoritative 8-page LaTeX source and compiled PDF are stored in the established OneDrive project folder.
+Current edition: 24 October 2026 - Generic Room Heat Load and Site Energy Planner.
 
-- [Full LaTeX source (.tex)](https://onedrive.live.com?cid=BDD18D98B3B583D5&id=BDD18D98B3B583D5!s5278308d6b9d434784f0fd6baf00d02b)
-- [Compiled PDF](https://onedrive.live.com?cid=BDD18D98B3B583D5&id=BDD18D98B3B583D5!s76609875c9fd44fba5d4fa2f8843d1df)
+- [Current full manual](Generic_Room_Site_Energy_Manual.md)
+- [PDF](https://onedrive.live.com?cid=BDD18D98B3B583D5&id=BDD18D98B3B583D5!s33975abdc5fe4a67af97967bbe9102a5)
+- [Editable LaTeX](https://onedrive.live.com?cid=BDD18D98B3B583D5&id=BDD18D98B3B583D5!sf956dbc0f925428b84a5c294598a0a06)
 
-The document covers technical thermal/psychrometric and hourly AC-PV optimization models, business case and NPV, data dictionary and relational schema, current versus target IT architecture, proposed APIs, security, user instructions, testing, limitations and roadmap. Current `app.py` is a research simulator with synthetic weather, not an approved controller.
+The new default planner covers multiple rooms, visible room geometry and openings, equipment and people, assigned fan/light circuits, sunrise/sunset schedules, historical extreme AC sizing and N+1, whole-site hourly electricity, annual solar size and life-cycle energy cost. Full hourly CSV, PDF and JSON exports are available in the app.
 
-Build locally after downloading the linked source:
-
-```bash
-pdflatex -interaction=nonstopmode Relay_Room_Technical_Business_Data_IT_User_Manual.tex
-pdflatex -interaction=nonstopmode Relay_Room_Technical_Business_Data_IT_User_Manual.tex
-```
+The previous relay calculator and its original documents are retained for reference and accessible from Calculator. This edition supersedes descriptions of synthetic weather as the main design basis. It remains engineering screening with explicit limitations, not a procurement certificate or physical controller.
