@@ -13,3 +13,13 @@ Download PDF design report, full hourly demand CSV and input/provenance JSON. Se
 The previous relay calculator remains available from the Calculator selector. Both are engineering screening tools, not CFD, certified HVAC procurement designs or physical AC controllers. No battery or demand-charge optimization is included.
 
 Tests: `pip install pytest` then `pytest -q`. Daily GitHub Actions and maintenance checks cover the application.
+
+
+## Running rooms, station revisions and grid commitments (24 October 2026)
+Running room now expands into individual bedrooms plus kitchen, dining, lobby, baths, laundry and corridors. Peak guests and a sleeping profile drive operating heat, with shared-zone guest allocation to avoid double counting. Full zone occupancy remains the conservative room AC sizing basis. Non-conditioned service zones do not incur artificial AC demand.
+
+Create/download a station revision JSON, retain it in the station's OneDrive folder, then upload/restore it to create the next revision with a parent hash. This is portable versioning, not a central authenticated registry or automatic OneDrive sync.
+
+Upload actual interval demand CSV (`timestamp,kva` or `timestamp,kw,pf`) for monthly peaks and contract-kVA cost comparisons under explicitly entered demand charges/minimums/penalties. Simulated hourly comparisons are clearly labelled; contract reductions require adequate seasonal meter evidence and utility approval. The app never submits a contract change.
+
+See the [running room / station versions / grid demand manual](docs/Running_Room_Versions_Grid_Manual.md).
