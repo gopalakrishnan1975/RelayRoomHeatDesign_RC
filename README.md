@@ -8,4 +8,6 @@ Download the current design inputs and numerical outputs using **Download comple
 
 Hourly dynamic programming includes thermal inertia, temperature/rate constraints and closed daily cycle. Default maximum relay-end temperature is 21 C. Spatial heat map is illustrative, not CFD. PV NPV extrapolates one day and is not investment-grade annual sizing. No AC equipment is controlled.
 
-Tests: `pip install pytest` then `pytest -q`. GitHub Actions runs on changes and daily. Live forecast, mocked forecast, synthetic mode and PDF generation have been exercised locally. The deployed Streamlit URL is still needed for independent website verification.
+Tests: `pip install pytest` then `pytest -q`. GitHub Actions runs on changes and daily. Live forecast, mocked forecast, synthetic mode and PDF generation have been exercised locally. Deployed app: https://relayroomheatdesignrc-fhfhpzvryxnksd7cef9kg8.streamlit.app/
+
+Deployment verification on 23 October 2026: browser confirmed live Open-Meteo forecast loading, rendered heat/energy results and successful complete-design PDF download. Daily maintenance checks use this URL.
