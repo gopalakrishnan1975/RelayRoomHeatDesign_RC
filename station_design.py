@@ -18,11 +18,14 @@ def running_room(rooms=10,beds_per_room=2,peak_guests=20,staff=4,kitchen_kw=12.,
     for i in range(rooms):
         name=f'Bedroom {i+1:03d}';zone(name,4,4,beds_per_room,kind='Bedroom',fraction=fraction)
         circuit(name+' lights',name,'Light',2,15,'Night');circuit(name+' fans',name,'Fan',1,60,'Always')
-    zone('Lobby / reception',6,4,max(1,math.ceil(peak_guests*.2))+staff,equipment=.5)
-    zone('Dining hall',8,5,max(1,math.ceil(peak_guests*.5)),occupancy='Meal hours')
-    zone('Kitchen',6,5,max(1,staff),ac=False,kind='Kitchen',equipment=1.,occupancy='Meal hours')
-    zone('Baths / toilets',6,4,max(1,math.ceil(peak_guests*.2)),ac=False,kind='Utility',window=1.)
-    zone('Laundry / services',4,3,max(1,staff//2),ac=False,kind='Utility')
+    zone('Lobby / reception',6,4,math.ceil(peak_guests*.2)+(1 if staff else 0),equipment=.5)
+    zones[-1].update(Guest_capacity=math.ceil(peak_guests*.2),Staff_people=1 if staff else 0)
+    zone('Dining hall',8,5,math.ceil(peak_guests*.5),occupancy='Meal hours')
+    zones[-1].update(Guest_capacity=math.ceil(peak_guests*.5),Staff_people=0)
+    zone('Kitchen',6,5,max(0,staff-2),ac=False,kind='Kitchen',equipment=1.,occupancy='Meal hours')
+    zone('Baths / toilets',6,4,math.ceil(peak_guests*.1),ac=False,kind='Utility',window=1.)
+    zones[-1].update(Guest_capacity=math.ceil(peak_guests*.1),Staff_people=0)
+    zone('Laundry / services',4,3,1 if staff>1 else 0,ac=False,kind='Utility')
     zone('Corridors',12,2,0,ac=False,kind='Circulation',equipment=0.,window=0.)
     for name in ['Lobby / reception','Dining hall','Kitchen','Baths / toilets','Laundry / services','Corridors']:
         circuit(name+' lights',name,'Light',6,18,'Always' if name in ['Lobby / reception','Corridors'] else 'Occupied hours')
@@ -33,7 +36,7 @@ def running_room(rooms=10,beds_per_room=2,peak_guests=20,staff=4,kitchen_kw=12.,
     circuit('Laundry equipment','Laundry / services','Other',1,laundry_kw*1000,'Occupied hours')
     circuit('Water pump','Site exterior','Other',1,750,'Occupied hours')
     circuit('Exterior lights','Site exterior','Light',8,30,'Night')
-    return pd.DataFrame(zones),pd.DataFrame(loads)
+    return pd.DataFrame(zones).fillna({'Guest_capacity':0,'Staff_people':0}),pd.DataFrame(loads)
 
 
 def revision(payload,station_code,label,previous=None,notes=''):
