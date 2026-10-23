@@ -1,0 +1,72 @@
+# Generic Room Heat Load and Site Energy Planner
+Technical, business, data, IT and user manual - 24 October 2026
+
+## 1. Purpose and scope
+The application calculates cooling demand for one or more generic rooms and aggregates AC electricity, continuous equipment, fans, lights and other circuits into a station or site demand profile. It sizes AC capacity against historical extreme coincident weather with a largest-unit-out N+1 check, and selects solar PV capacity within a user-entered available area to minimize discounted energy cost. The previous relay-room calculator remains available from the Calculator selector, including its illustrative spatial map and hourly temperature scheduler. The new default planner does not claim a CFD temperature field or direct AC control.
+
+## 2. Bare essential inputs
+Station/site name and code are report identifiers. Latitude and longitude determine weather. Historical start/end years determine the design basis, defaulting to the last 30 complete years. For each room enter a unique name, length, width, height, total window area, total door area, continuous equipment electricity in kW and maximum people simultaneously present. A second compact room table contains target temperature, occupancy schedule, installed AC unit count (including standby) and nominal TR per unit. For each fan/light/other circuit enter name, assigned room or Site exterior, type, count, watts per item and schedule. Site cost inputs are import tariff, optional peak tariff and hours, export credit, available PV area, area per kWp and an independently evaluated PV capacity. Shared engineering and finance assumptions are placed in collapsed sections to keep the main input flow short.
+
+## 3. User workflow
+1. Enter the station and verified coordinates. Changing station text alone does not relocate weather retrieval.
+2. Select Historical extreme design + annual energy. Choose complete years from 1940 through the latest complete year. Forecast day is explicitly operations-only.
+3. Add one row per room. Windows and doors are areas, not widths: multiply width by height and sum all openings. The gross wall area must exceed their combined area.
+4. Set each room's temperature, maximum occupancy schedule and proposed AC arrangement. All AC operates continuously at the specified target; occupancy changes heat generation, not the AC availability schedule.
+5. Enter room and exterior fans/lights/other loads. Each electrical item must appear once. Do not repeat a listed circuit in Equipment_kW.
+6. Choose schedules: Always, Daylight, Night, Occupied hours, or Off. Night is sunset to sunrise; Daylight is sunrise to sunset. Occupied hours are daily clock hours. Equal start/end means 24 hours; overnight windows are supported. Weekends/holidays are not separately modelled.
+7. Enter tariffs and PV constraints; review shared engineering assumptions.
+8. Click Load weather and sunrise/sunset. Edits to room/circuit/cost assumptions recalculate against the loaded weather. Changing weather location, basis or period requires retrieval again.
+9. Review each room's N+1 result, governing weather and heat contributions. Then review peak site electrical kW, annual kWh, PV optimum and discounted costs. Select a plot date for up to seven days of detailed graphs.
+10. Download the PDF, full hourly demand CSV and JSON of all input settings and provenance. JSON is an audit/export format; the interface does not yet import it automatically.
+
+## 4. Data sources and quality
+The Open-Meteo archive endpoint is https://archive-api.open-meteo.com/v1/archive with models=era5. Inputs requested are hourly temperature_2m (C), relative_humidity_2m (%) and shortwave_radiation (W/m2), plus daily sunrise and sunset. Forecast uses https://api.open-meteo.com/v1/forecast for one day. Timezone is Asia/Kolkata; this version is intended for Indian station/site scheduling. Historical requests are batched by five years, with 90-second request timeouts and 24-hour application caching. The forecast uses a 25-second timeout and the same caching wrapper; it is a planning snapshot, not a real-time control feed.
+
+Every expected hourly timestamp must be present, unique and ordered. Null, nonfinite or out-of-range RH/radiation data block the calculation. Unavailable or invalid sunrise/sunset also blocks calculations; polar sun cases are not supported. There is no silent synthetic or forecast replacement for historical data. Provenance records source, exact request URLs and retrieval UTC. Source documentation: https://open-meteo.com/en/docs/historical-weather-api and https://open-meteo.com/en/docs . Attribution: Open-Meteo / ECMWF ERA5, CC BY 4.0 as provided by Open-Meteo. Service usage limits and terms apply.
+
+ERA5 is gridded reanalysis, not a measured station extreme. Longer available history can be selected, but the historical maximum is not a guarantee against future extremes. Verify against available IMD/local measurements and site conditions before procurement. No independent IMD dataset is automatically ingested by this release.
+
+## 5. Thermal equations and assumptions
+For room floor area A=L*W, volume V=A*H, and net opaque wall area Awall=2*(L+W)*H-Awindow-Adoor, sensible envelope conduction is [Uroof*A + Uwall*Awall + Uwindow*Awindow + Udoor*Adoor] * max(0,Tout-Tin) / 1000 kW. Clipping negative conduction is conservative for cooling in cool conditions; free cooling and heating are not modelled. Shared U-values are user-editable; the default does not represent a measured building construction.
+
+Solar heat uses GHI * [effective roof solar factor*A + 0.0192*Awall + SHGC*Awindow] / 1000. This is a screening surrogate, not orientation-specific sol-air conduction, dynamic roof thermal storage or a radiation-view-factor calculation. The roof factor is adjustable and the fixed wall coefficient is disclosed here. No shading or tilted façade irradiance is inferred from room geometry.
+
+Infiltration mass flow is 1.18*V*ACH/3600 kg/s. Sensible infiltration is mass_flow*1.006*max(0,Tout-Tin) kW. Latent infiltration is max(0,mass_flow*2501*(wout-win)) kW, where w=0.62198*pwater/(101325-pwater), and saturation pressure is 610.94*exp(17.625*T/(T+243.04)) Pa. Constant standard pressure and air density are used. Indoor RH is an assumed design moisture state; no humidity-control or condensation transient is solved.
+
+People contribute separate editable sensible and latent heat rates, default 75 W and 55 W/person. Operating heat follows occupancy schedule. Cooling capacity design uses full entered people and all connected room circuits simultaneously as a conservative internal-load case, combined with each historical weather hour. Equipment electricity is continuous and assumed fully dissipated inside the room. Room-assigned lights, fans and other electrical circuits add equal heat; exterior circuits add no room cooling load. No heat transfer between rooms is solved.
+
+The maximum coincident total load for each room is multiplied by (1+design allowance/100). Each room may have a different governing hour. The sum of individual cooling maxima is not reported as the coincident site electrical peak; site peak is computed from the aggregated hourly electrical profile.
+
+## 6. AC capacity, redundancy and electricity
+Required nominal capacity per equal unit = design_cooling / [(installed_units-1)*3.517*available_capacity_fraction]. Proposed surviving capacity = (installed_units-1)*TR_each*3.517*available_capacity_fraction. N+1 passes only when surviving capacity meets design cooling. At least two units are required in this planner. The nominal TR and available fraction must be checked against manufacturer total AND sensible capacity at the actual indoor/outdoor design conditions. The default fraction 0.85 is illustrative.
+
+Operational AC electricity equals scheduled hourly thermal cooling / COP. COP=max(1,COPbase-COPslope*max(0,Tout-35)). Defaults are 3.5 and 0.025/C. This is an editable engineering approximation, not an inverter compressor map. The design allowance affects installed capacity, not every operating energy hour. Electricity assumes sufficient cooling capacity; a failing N+1 result is flagged rather than silently limiting power and pretending the indoor target was maintained.
+
+N+1 is a steady-state unit-out capacity check, not proof of resilience against common electrical supply or control failure. Independent protection, power backup, alarms, duty rotation, standby activation, restart delays and critical hotspot/humidity protection require site engineering. The preserved relay-room calculator retains its separate simplified standby-delay screening; the generic planner does not calculate room transient failure trajectories. Solar is given no firm AC capacity credit.
+
+## 7. Sunrise/sunset and scheduling
+All energy bins end at the displayed weather timestamp, aligning with preceding-hour mean shortwave radiation. Lights/fans/occupancy use overlap between that preceding hour and sunrise/sunset to avoid treating a partial dawn/dusk hour as a full hour. Temperature and RH at the ending timestamp approximate conditions in that bin. Business and peak-tariff integer hours use the corresponding bin start hour. Midnight uses the preceding day's solar interval approximation; for Indian sites it remains a night hour. Calendar-year energy totals follow the ending timestamps. This boundary convention is explicitly shared across demand, PV, tariff and exports.
+
+Demand = equipment electricity + lights + fans + other circuits + AC electricity. Every assigned circuit appears once in demand. Its cooling penalty is additional compressor electricity, not a duplicate circuit entry. Exterior loads bypass indoor cooling. Fans do not automatically reduce room setpoints or cooling demand; their electricity becomes indoor heat if located in the room.
+
+## 8. PV sizing and cost optimization
+Hourly PV = kWp * GHI/1000 * performance ratio. Default performance ratio is 0.78. This is a horizontal-irradiance proxy without tilt, shading, clipping, snow, detailed temperature loss or degradation. Available area / area per kWp establishes the maximum feasible PV. The entered area must already exclude obstructions and unsuitable surfaces; it is not automatically inferred from all room floor areas. Default area per kWp is 5 m2.
+
+Grid import=max(0,demand-PV); export=max(0,PV-demand). Check demand+export=PV+import. Import tariff may have one daily peak window, including overnight windows; equal peak start/end means peak tariff all day. Export credit is independent. No battery, sanctioned-load demand charge, fixed charge, tax, subsidy, tariff escalation or storage is included.
+
+For historical data, energy and bills are averaged over the selected complete calendar years. Baseline is the same hourly demand with zero PV. Annual bill saving = baseline bill - PV case net bill. Annual O&M = PV capex*O&M_percent/100. Incremental NPV = sum over economic years of (annual bill saving - O&M)/(1+real_discount)^year - capex. Discounted life-cycle cost = capex + sum (annual bill+O&M)/(1+real_discount)^year. Select PV capacity minimizing life-cycle cost among 0.5 kWp steps and the exact area limit. Zero PV remains a candidate. An independently entered PV size is also evaluated; if it exceeds area it is labelled infeasible and excluded from the constrained optimum. The tool limits interactive search to 500 kWp.
+
+Cost optimization changes PV size only. It does not alter approved room temperatures, attendance, working hours or required lighting. To compare a schedule change, edit its explicit inputs and compare results. Annual sizing is not extrapolated from the forecast day. Forecast mode evaluates only its entered PV and daily bill; it does not claim an annual economic optimum.
+
+## 9. Outputs and audit trail
+PDF: all room/circuit inputs, shared assumptions, site and weather provenance, period, room design maxima and N+1 checks, governing heat-source breakdown, annual demand/PV/import/export, selected-week hourly demand and all PV economic alternatives. The PDF includes first/last-week sunrise/sunset samples; full hourly results are in the companion CSV to avoid a multi-decade report with hundreds of thousands of rows. JSON records input assumptions, selected/evaluated PV sizes and provenance. Results remain in memory; no external database or physical control integration is implemented.
+
+## 10. Software architecture and performance
+app.py handles the generic UI, validation messages, visualization and exports. site_energy.py handles room/circuit validation, weather ingestion, schedules, vectorized heat/electric calculations and cost optimization. legacy_app.py preserves the previous relay calculator; extreme_design.py retains its historical sizing utility. There are no new cloud credentials. Station coordinates and requested periods are transmitted to Open-Meteo; room inputs are calculated in the running Streamlit app.
+
+Thermal and schedule calculations use NumPy/Pandas arrays across weather hours. Plotting is restricted to seven days while energy optimization uses every selected hour. Five-year fetch batches bound request size, caches avoid repeat retrieval, and PV search uses a bounded candidate set. CSV/PDF export generation can take longer for a multi-decade run. This is a modular Streamlit research app, not a fleet-scale real-time microservice platform.
+
+## 11. Validation and limitations
+Automated tests cover largest-unit-out redundancy, historical coincident extreme selection, day/night complement and fractional dawn/dusk hours, people sensible/latent effects, circuit heat and non-duplication, exterior load treatment, exact room aggregation, PV/grid conservation, zero-PV optimization and invalid geometry. The previous relay UI retains regression coverage. Live 2025 Open-Meteo retrieval with sunrise/sunset returned 8,760 complete hours. A generic UI run with this data generated charts, annual costs, a constrained PV optimum and a PDF. Further deployment evidence is recorded in release notes after testing.
+
+No CFD, calibrated material dynamics, inter-room coupling, room humidity transient, occupancy stochasticity, thermostat cycling, AC electrical starting current, distribution-board sizing or equipment certification is implied. The model should be calibrated with room measurements, nameplate/actual electrical readings and manufacturer performance data. Energy-economic screening is distinct from approved electrical protection and procurement design.
