@@ -12,6 +12,7 @@ from reportlab.lib import colors
 from site_energy import ROOM_DEFAULT,CIRCUIT_DEFAULT,SCHEDULES,weather,calculate,optimize_pv,economics
 from facility_design import TEMPLATES,template_data,transformer_design,battery_dispatch
 from station_design import running_room,revision,read_revision,monthly_demand,contract_options
+from ev_charging import EV_DEFAULTS,charging_profile
 
 st.set_page_config(page_title='Railway Facility Energy Design Studio',layout='wide')
 st.title('Railway Facility Energy Design Studio')
@@ -178,7 +179,23 @@ with st.expander('Solar costing assumptions'):
  p['life']=int(number_input('Economic horizon years',1,40,int(loaded.get('assumptions',{}).get('life',20))))
 st.caption('Optimization selects PV capacity minimizing discounted grid cost + PV capex + O&M within available area, in 0.5 kWp steps plus the exact area limit. PV capacity is optimized without BESS; the entered battery is evaluated separately. Grid demand charges are compared separately below. No tariff escalation or PV degradation. GHI is a horizontal PV proxy; verify tilt, shade and equipment performance before procurement.')
 
-st.subheader('6. Grid capacity commitment and actual maximum demand')
+st.subheader('6. EV charging points - AC destination and DC fast charging')
+st.caption('Add one row per charger group. Points is simultaneous connectors; Vehicles_per_day is the TOTAL daily sessions for that group, not per point. Grid_kW_per_point is the mains electrical input rating. Battery energy requested is converted to grid energy using Efficiency; losses are not counted twice. For a DC output rating, enter its corresponding manufacturer mains input rating. Ratings are illustrative and must match equipment/vehicles.')
+ev_settings=loaded.get('ev_settings',{})
+ev_groups=st.data_editor(pd.DataFrame(ev_settings.get('groups',EV_DEFAULTS)),num_rows='dynamic',hide_index=True,key='ev_groups_'+str(st.session_state.get('restore_epoch',0)),width='stretch',column_config={
+ 'Points':st.column_config.NumberColumn(min_value=0,step=1),
+ 'Vehicles_per_day':st.column_config.NumberColumn(min_value=0,step=1),
+ 'Grid_kW_per_point':st.column_config.NumberColumn(min_value=.1),
+ 'Efficiency':st.column_config.NumberColumn(min_value=.01,max_value=1.),
+ 'Start_hour':st.column_config.NumberColumn(min_value=0,max_value=23,step=1),
+ 'End_hour':st.column_config.NumberColumn(min_value=0,max_value=23,step=1)})
+ev_managed=st.checkbox('Managed EV charging - prefer solar and cheaper hours',value=bool(ev_settings.get('managed',False)),key='ev_managed_'+str(st.session_state.get('restore_epoch',0)))
+ev_ceiling=number_input('Managed charging site grid-import ceiling kW',min_value=0.,value=float(ev_settings.get('ceiling',100.)))
+ev_firm=st.checkbox('Charging import ceiling is enforced by a verified external controller',value=bool(ev_settings.get('firm',False)),key='ev_firm_'+str(st.session_state.get('restore_epoch',0)))
+ev_in_meter=st.checkbox('Uploaded meter data already includes all planned EV charging',value=bool(ev_settings.get('in_meter',False)),key='ev_meter_'+str(st.session_state.get('restore_epoch',0)))
+st.caption('Equal start/end means 24 hours. All group vehicles are assumed available within the entered window; this is aggregate energy scheduling, not a queue or vehicle-level arrival/taper model. Unserved energy is shown, not hidden. Managed charging cannot curtail the existing building load. The app does not control chargers. PV sizing keeps the EV schedule fixed at the entered reference PV; it is not joint PV/charging optimization.')
+
+st.subheader('7. Grid capacity commitment and actual maximum demand')
 st.caption('Contract demand (kVA) is separate from transformer rating and energy (kWh). Upload utility interval maximum-demand data at the actual billing interval. Hourly simulation can understate 15/30-minute peaks; PV/BESS savings alone do not justify a contract reduction. This tool does not submit a utility contract change.')
 meter_file=st.file_uploader('Meter demand CSV: timestamp,kva OR timestamp,kw,pf',type=['csv'])
 grid_defaults=loaded.get('grid_contract',{})
@@ -202,7 +219,7 @@ if meter_file is not None:
  except Exception as exc:st.error('Meter data invalid: '+str(exc))
 label=text_input('Station design label',loaded.get('design_label','Facility energy design'))
 notes=st.text_area('Revision notes')
-input_snapshot=dict(station=station,code=code,latitude=latitude,longitude=longitude,basis=basis,start_year=start_year,end_year=end_year,rooms=rooms.to_dict('records'),circuits=circuits.to_dict('records'),assumptions=p,solar_area_m2=roof_area,area_per_kwp=m2kw,evaluated_pv_kwp=installed,facility_template=st.session_state.get('active_template','Custom / blank'),running_room_program=program,design_label=label,measured_monthly=measured_monthly.to_dict('records') if measured_monthly is not None else None,
+input_snapshot=dict(station=station,code=code,latitude=latitude,longitude=longitude,basis=basis,start_year=start_year,end_year=end_year,rooms=rooms.to_dict('records'),circuits=circuits.to_dict('records'),assumptions=p,solar_area_m2=roof_area,area_per_kwp=m2kw,evaluated_pv_kwp=installed,facility_template=st.session_state.get('active_template','Custom / blank'),running_room_program=program,design_label=label,ev_settings=dict(groups=ev_groups.to_dict('records'),managed=ev_managed,ceiling=ev_ceiling,firm=ev_firm,in_meter=ev_in_meter),measured_monthly=measured_monthly.to_dict('records') if measured_monthly is not None else None,
  transformer_settings=dict(power_factor=power_factor,utilization=transformer_util,reserve=transformer_reserve),bess_settings=dict(kwh=bess_kwh,kw=bess_kw,eff=bess_eff,capex=bess_capex,om=bess_om),grid_contract=dict(current=current_contract,rate=demand_rate,floor=min_fraction,excess=excess_rate,reserve=contract_reserve,step=contract_step,no_generation_credit=restore_basis))
 if st.button('Create station design revision'):
  try:
@@ -226,6 +243,13 @@ try:
  summary,hourly,components=calculate(f,rooms,circuits,p)
 except Exception as exc:
  st.error('Check inputs: '+str(exc));st.stop()
+ev_base_hourly=hourly.copy()
+base_site_peak=float(hourly['Total demand kW'].max())
+try:
+ ev_power,ev_summary,ev_connected=charging_profile(hourly,ev_groups,installed,p,ev_managed,ev_ceiling)
+ hourly['EV charging kW']=ev_power
+ hourly['Total demand kW']+=ev_power
+except Exception as exc:st.error('EV charging inputs invalid: '+str(exc));st.stop()
 historical=basis.startswith('Historical')
 years=end_year-start_year+1 if historical else 1.
 max_pv=roof_area/m2kw
@@ -235,9 +259,24 @@ if historical:
  candidates,best=optimize_pv(hourly,max_pv,p,years);chosen=float(best.capacity_kwp)
 else:
  chosen=installed;candidates=None;best=None
+if ev_managed and ev_connected>0:
+ # Re-dispatch at the actually selected PV so the import ceiling is not based on a larger reference array.
+ ev_power,ev_summary,ev_connected=charging_profile(ev_base_hourly,ev_groups,chosen,p,True,ev_ceiling)
+ hourly['EV charging kW']=ev_power
+ hourly['Total demand kW']=ev_base_hourly['Total demand kW']+ev_power
+ if historical:candidates,_=optimize_pv(hourly,max_pv,p,years)
+if not ev_summary.empty:
+ st.subheader('EV charging energy and capacity check')
+ st.dataframe(ev_summary,hide_index=True)
+ st.write(f'Connected EV grid input: {ev_connected:.2f} kW; scheduled coincident EV peak: {ev_power.max():.2f} kW.')
+ if ev_summary['Unserved battery kWh (period)'].sum()>1e-6:st.error('EV charging energy cannot be met within points, windows or import ceiling. Add capacity/time or reduce requested sessions.')
+ if ev_managed and base_site_peak>ev_ceiling:st.warning('The building load itself exceeds the EV import ceiling in some hours; managed charging cannot correct that overload.')
+ev_capacity_peak=max(base_site_peak,ev_ceiling) if ev_connected>0 and ev_managed and ev_firm else max(float(hourly['Total demand kW'].max()),base_site_peak+ev_connected)
+
+
 cost,solar,imports,exports=economics(hourly,chosen,p,years)
 hourly['PV generation kW']=solar;hourly['Grid import kW']=imports;hourly['Grid export kW']=exports
-transformer=transformer_design(float(hourly['Total demand kW'].max()),chosen,power_factor,transformer_util,transformer_reserve)
+transformer=transformer_design(ev_capacity_peak,chosen,power_factor,transformer_util,transformer_reserve)
 if bess_kwh>0:
  if bess_kw<=0:st.error('Nonzero BESS capacity requires inverter power.');st.stop()
  storage_hourly=hourly.copy()
@@ -270,9 +309,17 @@ try:
  demand_basis=measured_monthly
  if demand_basis is None:
   model_kw=hourly['Total demand kW'] if restore_basis else hourly['Grid import kW']
-  demand_basis=pd.DataFrame({'Month':hourly['Time IST'].dt.to_period('M').astype(str),'Measured peak kVA':model_kw/power_factor}).groupby('Month',as_index=False)['Measured peak kVA'].max()
+  if restore_basis and ev_connected>0:
+   building_kw=hourly['Total demand kW']-hourly['EV charging kW']
+   model_kw=np.maximum(building_kw,ev_ceiling) if ev_managed and ev_firm else building_kw+ev_connected
+  demand_basis=pd.DataFrame({'Month':hourly['Time IST'].dt.to_period('M').astype(str),'Measured peak kVA':np.asarray(model_kw)/power_factor}).groupby('Month',as_index=False)['Measured peak kVA'].max()
   demand_label='SIMULATED hourly demand; planning estimate only'
- else:demand_label='Uploaded actual interval demand; measurement-period evidence'
+ else:
+  demand_basis=demand_basis.copy()
+  if ev_connected>0 and not ev_in_meter:
+   demand_basis['Measured peak kVA']+=ev_connected/power_factor
+   demand_label='Uploaded meter peak + conservative planned EV connected load (not an observed combined peak)'
+  else:demand_label='Uploaded actual interval demand; measurement-period evidence'
  options,contract_result,required_contract=contract_options(demand_basis,current_contract,demand_rate,min_fraction,excess_rate,contract_reserve,contract_step,max_kva=100000.)
  st.subheader('Grid commitment comparison')
  st.write(demand_label)
@@ -296,20 +343,21 @@ st.subheader('Overall site electricity and solar')
 a,b,c,d=st.columns(4)
 a.metric('Peak site electrical demand',f"{hourly['Total demand kW'].max():.2f} kW")
 b.metric('Mean annual demand' if historical else 'Forecast-day demand',f"{hourly['Total demand kW'].sum()/years:,.0f} kWh")
-c.metric('Lowest-cost PV' if historical else 'Evaluated PV',f'{chosen:.2f} kWp')
+c.metric(('PV candidate (managed EV)' if ev_managed and ev_connected>0 else 'Lowest-cost PV') if historical else 'Evaluated PV',f'{chosen:.2f} kWp')
 d.metric('Mean annual net energy bill' if historical else 'Forecast-day net energy bill',f"Rs {cost['annual_bill']:,.0f}")
 if historical:
  evaluated,*_=economics(hourly,installed,p,years)
  st.write(f"PV capex Rs {cost['capex']:,.0f}; annual gross bill saving Rs {cost['annual_saving']:,.0f}; incremental NPV Rs {cost['npv']:,.0f}; {p['life']}-year discounted life-cycle cost Rs {cost['life_cycle_cost']:,.0f}.")
  if installed>max_pv:st.warning('The separately evaluated PV exceeds the entered available area; it is excluded from the area-constrained optimum.')
- st.dataframe(pd.DataFrame([dict(Scenario='Selected PV evaluation',**evaluated),dict(Scenario='Area-constrained optimum',**cost)]),hide_index=True)
+ st.dataframe(pd.DataFrame([dict(Scenario='Selected PV evaluation',**evaluated),dict(Scenario='Area-constrained PV candidate',**cost)]),hide_index=True)
  st.plotly_chart(px.line(candidates,x='capacity_kwp',y='life_cycle_cost',title='Discounted total energy cost versus PV size'),width='stretch')
+ if ev_managed and ev_connected>0:st.caption('Managed EV uses a two-pass heuristic: choose PV against reference charging, then re-dispatch EV at that PV. The candidate-cost curve holds the final EV schedule fixed. This is not a joint/global PV-charging optimum; an energy shortfall remains visible.')
  st.caption('Economic optimum uses all historical years, with equal weight to each year. Energy demand assumes adequate cooling capacity; a failed N+1 check means the cooling requirement is not assured. Solar optimization changes PV size only, not approved room temperatures or occupancy.')
 
 # Plot at most one week interactively, retain full data for energy and costing.
 day=st.date_input('Plot start date',value=f.time.iloc[-1].date(),min_value=f.time.iloc[0].date(),max_value=f.time.iloc[-1].date())
 plot=hourly[(hourly['Time IST']>=pd.Timestamp(day))&(hourly['Time IST']<pd.Timestamp(day)+pd.Timedelta(days=7))]
-st.plotly_chart(px.area(plot,x='Time IST',y=['Equipment kW','Lights kW','Fans kW','Other kW','AC kW'],title='Electrical demand by source'),width='stretch')
+st.plotly_chart(px.area(plot,x='Time IST',y=['Equipment kW','Lights kW','Fans kW','Other kW','AC kW','EV charging kW'],title='Electrical demand by source'),width='stretch')
 st.plotly_chart(px.line(plot,x='Time IST',y=['Total demand kW','PV generation kW','Grid import kW'],title='Site demand, solar and grid electricity'),width='stretch')
 st.dataframe(f[['time','sunrise','sunset']].drop_duplicates('sunrise').tail(7),hide_index=True)
 st.dataframe(components,hide_index=True)
@@ -344,7 +392,9 @@ def report_pdf():
  for k,v in p.items():text(f'{k}: {v}')
  for k,v in dict(usable_pv_area_m2=roof_area,area_per_kwp=m2kw,evaluated_pv_kwp=installed,chosen_pv_kwp=chosen).items():text(f'{k}: {v}')
  text('Station revision / running-room programme','Heading1');text(json.dumps(program));text('Latest created revision: '+str(st.session_state.get('parent_revision',{}).get('revision','Not saved')));text('Grid contract inputs: '+json.dumps(input_snapshot['grid_contract']));text('Grid comparison basis: '+demand_label);
+ text('EV charger inputs: '+json.dumps(input_snapshot['ev_settings']));text(f'EV connected input {ev_connected:.3f} kW; electrical capacity design peak {ev_capacity_peak:.3f} kW. Unless externally enforced managed limits are confirmed, transformer screening includes full connected EV load plus building peak.');
  text('Results','Heading1');text('Transformer: '+json.dumps(transformer));text(f'BESS {bess_kwh} kWh, {bess_kw} kW, efficiency {bess_eff}');text(json.dumps(cost));text(f"Peak total site demand {hourly['Total demand kW'].max():.3f} kW. All capacity results are preliminary screening, not procurement certification.")
+ if not ev_summary.empty:table('EV energy and capacity results',ev_summary)
  if contract_result is not None:table('Grid contract options (user-specified screening tariff)',options)
  table('Room inputs',rooms);table('Fan, light and other circuits',circuits);table('AC design results and N+1 checks',summary);table('Governing-hour heat contributions',components);table('Annual site electricity',annual)
  table('Sunrise and sunset: first and last seven days',pd.concat([f[['time','sunrise','sunset']].drop_duplicates('sunrise').head(7),f[['time','sunrise','sunset']].drop_duplicates('sunrise').tail(7)]).drop_duplicates())
