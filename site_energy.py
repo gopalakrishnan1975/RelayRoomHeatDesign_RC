@@ -25,6 +25,9 @@ def validate_rooms(rooms,circuits):
     if (vals.loc[enabled,'AC_units']<2).any() or (vals.AC_units%1!=0).any() or (vals.People%1!=0).any():raise ValueError('Use integer people counts and at least two integer AC units for N+1')
     if not vals.Target_C.between(10,35).all():raise ValueError('Room target temperatures must be 10-35 C')
     if 'Occupancy_fraction' in rooms and not rooms.Occupancy_fraction.between(0,1).all():raise ValueError('Occupancy fraction must be 0-1')
+    if 'Guest_capacity' in rooms:
+        guests=rooms.Guest_capacity.fillna(0);staff=rooms.get('Staff_people',pd.Series(0,index=rooms.index)).fillna(0)
+        if not np.isfinite(guests).all() or not np.isfinite(staff).all() or (guests<0).any() or (staff<0).any() or ((guests+staff)>rooms.People).any():raise ValueError('Guest capacity plus staff must fit each zone People count')
     if not rooms.Occupancy.isin(SCHEDULES).all():raise ValueError('Unknown occupancy schedule')
     walls=2*(vals.Length_m+vals.Width_m)*vals.Height_m
     if ((vals.Window_m2+vals.Door_m2)>walls).any():raise ValueError('Windows plus doors exceed gross wall area')
@@ -96,6 +99,19 @@ def calculate(frame,rooms,circuits,p):
         electrical[key]+=power
         if row['Room'] in room_loads:
             room_loads[row['Room']]+=power;room_peak[row['Room']]+=watts
+    guest_alloc={};remaining_guests=None;bed_fraction=None
+    if 'running_peak_guests' in p and 'Guest_capacity' in rooms:
+        remaining_guests=np.full(n,float(p['running_peak_guests']))
+        for zone in rooms.to_dict('records'):
+            capacity=float(zone.get('Guest_capacity',0) or 0)
+            if capacity>0:
+                allocated=np.minimum(remaining_guests,capacity*scheduled[zone['Occupancy']])
+                guest_alloc[zone['Room']]=allocated;remaining_guests-=allocated
+        bed_capacity=float(rooms.loc[rooms.get('Zone_type')=='Bedroom','People'].sum())
+        profile=np.asarray(p.get('sleeping_profile',[1.]*24),float)
+        if len(profile)!=24 or not np.isfinite(profile).all() or ((profile<0)|(profile>1)).any():raise ValueError('Invalid sleeping profile')
+        desired=float(p['running_peak_guests'])*profile[(frame.time.dt.hour.to_numpy()-1)%24]
+        bed_fraction=np.minimum(remaining_guests,desired)/max(1,bed_capacity)
     summaries=[];component_peaks=[];thermal_total=np.zeros(n)
     for room in rooms.to_dict('records'):
         name=room['Room'];area=room['Length_m']*room['Width_m'];volume=area*room['Height_m']
@@ -106,10 +122,15 @@ def calculate(frame,rooms,circuits,p):
         sensible=mdot*1.006*dt
         latent=np.maximum(0,mdot*2501*(humidity_ratio(t,rh)-humidity_ratio(sp,p['indoor_rh']/100)))
         occupancy=scheduled[room['Occupancy']]*room.get('Occupancy_fraction',1.)
-        if room.get('Zone_type')=='Bedroom':
+        if room.get('Zone_type')=='Bedroom' and bed_fraction is not None:
+            occupancy=bed_fraction*scheduled[room['Occupancy']]
+        elif room.get('Zone_type')=='Bedroom':
             profile=np.asarray(p.get('sleeping_profile',[1.]*24),float)
             if len(profile)!=24 or not np.isfinite(profile).all() or ((profile<0)|(profile>1)).any():raise ValueError('Sleeping profile needs 24 fractions in 0-1')
             occupancy*=profile[(frame.time.dt.hour.to_numpy()-1)%24]
+        if name in guest_alloc:
+            count=guest_alloc[name]+float(room.get('Staff_people',0))*scheduled[room['Occupancy']]
+            occupancy=count/max(1,room['People'])
         people=room['People']*(p['person_sensible']+p['person_latent'])/1000
         equipment=np.full(n,room['Equipment_kW'])
         total=envelope+solar+sensible+latent+equipment+people*occupancy+room_loads[name]
@@ -129,6 +150,7 @@ def calculate(frame,rooms,circuits,p):
     result=pd.DataFrame(electrical);result.insert(0,'Time IST',frame.time)
     result['Thermal cooling kW']=thermal_total;result['Total demand kW']=sum(electrical.values())
     result['GHI W/m2']=ghi;result['Ambient C']=t
+    if bed_fraction is not None:result['Guests accounted for']=sum(guest_alloc.values())+bed_fraction*bed_capacity
     return pd.DataFrame(summaries),result,pd.DataFrame(component_peaks)
 
 def economics(hourly,capacity,p,annual_years):
