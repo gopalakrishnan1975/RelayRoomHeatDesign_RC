@@ -1,13 +1,15 @@
-# Relay Room Thermal and Solar Simulator
+# Generic Room Heat Load and Site Energy Planner
 
-Run `pip install -r requirements.txt` then `streamlit run app.py`.
+[Open Streamlit app](https://relayroomheatdesignrc-fhfhpzvryxnksd7cef9kg8.streamlit.app/)
 
-Enter station name/code (default Mancherial/MCI) and verified coordinates. Open-Meteo supplies hourly temperature, humidity and solar radiation. Changing name/code alone does not locate another station: update coordinates too. Live requests are cached for one hour; API failures stop with a visible error. Synthetic demonstration is an explicit alternative.
+Run `pip install -r requirements.txt` and `streamlit run app.py`.
 
-Download the current design inputs and numerical outputs using **Download complete design report PDF**. See [weather and PDF guide](docs/wiki/Weather-and-PDF.md).
+The main page now exposes room length/width/height, total window and door areas, equipment kW and people. Add rooms, set target temperatures and proposed AC units, and assign fans/lights/other circuits to rooms or Site exterior. Night/daylight schedules follow daily Open-Meteo sunrise/sunset; occupied hours are configurable.
 
-Hourly dynamic programming includes thermal inertia, temperature/rate constraints and closed daily cycle. Default maximum relay-end temperature is 21 C. Spatial heat map is illustrative, not CFD. PV NPV extrapolates one day and is not investment-grade annual sizing. No AC equipment is controlled.
+Historical ERA5 weather supports extreme coincident AC sizing with derated largest-unit-out N+1 checks. Aggregate electricity includes AC, equipment, fans, lights and other circuits without double-counting. Historical hourly demand and solar feed area-constrained PV life-cycle cost optimization with base/peak import and export tariffs. Forecast mode remains operations-only.
 
-Tests: `pip install pytest` then `pytest -q`. GitHub Actions runs on changes and daily. Live forecast, mocked forecast, synthetic mode and PDF generation have been exercised locally. Deployed app: https://relayroomheatdesignrc-fhfhpzvryxnksd7cef9kg8.streamlit.app/
+Download PDF design report, full hourly demand CSV and input/provenance JSON. See the [rewritten integrated manual](docs/Generic_Room_Site_Energy_Manual.md) and [wiki](docs/wiki/Home.md).
 
-Deployment verification on 23 October 2026: browser confirmed live Open-Meteo forecast loading, rendered heat/energy results and successful complete-design PDF download. Daily maintenance checks use this URL.
+The previous relay calculator remains available from the Calculator selector. Both are engineering screening tools, not CFD, certified HVAC procurement designs or physical AC controllers. No battery or demand-charge optimization is included.
+
+Tests: `pip install pytest` then `pytest -q`. Daily GitHub Actions and maintenance checks cover the application.
