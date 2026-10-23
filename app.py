@@ -179,8 +179,8 @@ with st.expander('Solar costing assumptions'):
  p['life']=int(number_input('Economic horizon years',1,40,int(loaded.get('assumptions',{}).get('life',20))))
 st.caption('Optimization selects PV capacity minimizing discounted grid cost + PV capex + O&M within available area, in 0.5 kWp steps plus the exact area limit. PV capacity is optimized without BESS; the entered battery is evaluated separately. Grid demand charges are compared separately below. No tariff escalation or PV degradation. GHI is a horizontal PV proxy; verify tilt, shade and equipment performance before procurement.')
 
-st.subheader('6. EV charging points - AC destination and DC fast charging')
-st.caption('Add one row per charger group. Points is simultaneous connectors; Vehicles_per_day is the TOTAL daily sessions for that group, not per point. Grid_kW_per_point is the mains electrical input rating. Battery energy requested is converted to grid energy using Efficiency; losses are not counted twice. For a DC output rating, enter its corresponding manufacturer mains input rating. Ratings are illustrative and must match equipment/vehicles.')
+st.subheader('6. EV charging — two-wheelers and four-wheelers, AC and DC')
+st.caption('Use separate rows for two-wheelers and four-wheelers, including AC/slow, destination and DC fast charging. Example ratings and battery energy are editable, not vehicle compatibility guarantees. Points is simultaneous connectors; Vehicles_per_day is the TOTAL daily sessions for that group, not per point. Grid_kW_per_point is the mains electrical input rating. Battery energy requested is converted to grid energy using Efficiency; losses are not counted twice. For a DC output rating, enter its corresponding manufacturer mains input rating. Ratings are illustrative and must match equipment/vehicles.')
 ev_settings=loaded.get('ev_settings',{})
 ev_groups=st.data_editor(pd.DataFrame(ev_settings.get('groups',EV_DEFAULTS)),num_rows='dynamic',hide_index=True,key='ev_groups_'+str(st.session_state.get('restore_epoch',0)),width='stretch',column_config={
  'Points':st.column_config.NumberColumn(min_value=0,step=1),
