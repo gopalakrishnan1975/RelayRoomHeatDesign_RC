@@ -1,3 +1,11 @@
+# Automatic station locations (24 October 2026)
+
+Enter a station code in **Station code lookup** mode to populate station name and latitude/longitude automatically from the bundled 8,697-station directory. Choose **Manual coordinates** for an exact facility location and editable name/description. Unknown codes never reuse another station's coordinates. Existing saved coordinate-based designs remain preserved in manual mode.
+
+See [location lookup, provenance and tests](docs/Station_Location_Lookup.md). The directory is community-maintained; verify the building location for engineering design. 25 regression tests passed before publishing this change.
+
+---
+
 # Generic Room Heat Load and Site Energy Planner
 
 [Open Streamlit app](https://relayroomheatdesignrc-fhfhpzvryxnksd7cef9kg8.streamlit.app/)
