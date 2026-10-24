@@ -1,0 +1,10 @@
+{
+  "source": "https://github.com/prasenjit-27/Indian-Railway-Data",
+  "commit": "1dc0ddbc6a06b09ef69d4825ff3127c1f29640fa",
+  "retrieved": "2026-10-24",
+  "license": "MIT",
+  "valid_records": 8697,
+  "excluded_records": 293,
+  "sha256": "d4f018d5f5803c49aec01f0b4a314e183772146477b87f38843b3c96ec3ce3fd",
+  "note": "Community dataset, not an authoritative railway station master. Names preserved; non-geographic metadata omitted because stale/incomplete. Verify station-centre coordinates for building design."
+}

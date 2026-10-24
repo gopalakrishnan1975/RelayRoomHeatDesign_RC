@@ -1,3 +1,4 @@
+from station_lookup import find_station
 import numpy as np
 import pandas as pd
 import pytest
@@ -39,7 +40,7 @@ def test_ev_ui_with_cached_weather_and_revision():
  at.session_state['restored_payload']={'ev_settings':{'groups':[g]}}
  at.session_state['restore_epoch']=1
  last=datetime.now().year-1
- f=fixture();at.session_state['site_weather']=((18.872,79.444,last-29,last,'Historical extreme design + annual energy'),f,{'source':'controlled fixture','urls':[],'retrieved_utc':'test'})
+ f=fixture();at.session_state['site_weather']=((find_station('MCI')['latitude'],find_station('MCI')['longitude'],last-29,last,'Historical extreme design + annual energy'),f,{'source':'controlled fixture','urls':[],'retrieved_utc':'test'})
  at.run(timeout=60)
  assert not at.exception,[e.value for e in at.exception]
  ev_table=next(df.value for df in at.dataframe if 'Unserved battery kWh (period)' in df.value.columns)

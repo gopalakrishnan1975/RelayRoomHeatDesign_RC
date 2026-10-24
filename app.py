@@ -13,6 +13,7 @@ from site_energy import ROOM_DEFAULT,CIRCUIT_DEFAULT,SCHEDULES,weather,calculate
 from facility_design import TEMPLATES,template_data,transformer_design,battery_dispatch
 from station_design import running_room,revision,read_revision,monthly_demand,contract_options
 from ev_charging import EV_DEFAULTS,charging_profile
+from station_lookup import find_station,coordinate_location
 
 st.set_page_config(page_title='Railway Facility Energy Design Studio',layout='wide')
 st.title('Railway Facility Energy Design Studio')
@@ -57,10 +58,41 @@ if st.button('Restore station design'):
 loaded=st.session_state.get('restored_payload',{})
 
 st.subheader('1. Station and weather basis')
-a,b,c,d=st.columns(4)
-station=col_text(a,'Station / site name',loaded.get('station','Mancherial'));code=col_text(b,'Station code',loaded.get('code','MCI'))
-latitude=col_input(c,'Latitude',-90.,90.,loaded.get('latitude',18.872),format='%.5f');longitude=col_input(d,'Longitude',-180.,180.,loaded.get('longitude',79.444),format='%.5f')
-st.caption('Changing name/code does not change coordinates. Current scheduling timezone is Asia/Kolkata (India).')
+# Old revisions preserve explicitly saved coordinates rather than silently moving the design.
+default_location_mode=loaded.get('location_mode','Manual coordinates' if 'latitude' in loaded and 'longitude' in loaded else 'Station code lookup')
+location_mode=st.radio('Location entry',['Station code lookup','Manual coordinates'],index=0 if default_location_mode=='Station code lookup' else 1,key='location_mode_'+str(st.session_state.get('restore_epoch',0)),horizontal=True)
+location_ready=True;location_source={}
+if location_mode=='Station code lookup':
+ code=text_input('Station code',loaded.get('code','MCI')).strip().upper()
+ st.session_state['pending_station_code']=code
+ try:
+  found=find_station(code)
+  station=found['name'];latitude=found['latitude'];longitude=found['longitude'];location_source=found
+  st.session_state['last_resolved_location']=found
+  a,b,c=st.columns(3)
+  a.text_input('Station / site name',value=station,disabled=True,key='resolved_name_'+code+'_'+str(st.session_state.get('restore_epoch',0)))
+  b.number_input('Latitude',value=latitude,format='%.6f',disabled=True,key='resolved_lat_'+code)
+  c.number_input('Longitude',value=longitude,format='%.6f',disabled=True,key='resolved_lon_'+code)
+  st.caption('Matched '+code+' in the bundled community station directory (24 October 2026). Station-centre coordinates; select Manual coordinates for the actual facility location. Source: https://github.com/prasenjit-27/Indian-Railway-Data . Current scheduling timezone is Asia/Kolkata (India).')
+ except Exception as exc:
+  location_ready=False;station='';latitude=None;longitude=None
+  st.warning(str(exc))
+else:
+ previous=st.session_state.get('last_resolved_location',{})
+ pending=st.session_state.get('pending_station_code','')
+ if pending and pending!=previous.get('code'):previous={}
+ a,b,c,d=st.columns(4)
+ station_name=col_text(a,'Station / site name',loaded.get('station',previous.get('name','')))
+ manual_code=col_text(b,'Station code',loaded.get('code',pending or previous.get('code','')))
+ latitude=col_input(c,'Latitude',-90.,90.,loaded.get('latitude',previous.get('latitude')),format='%.6f')
+ longitude=col_input(d,'Longitude',-180.,180.,loaded.get('longitude',previous.get('longitude')),format='%.6f')
+ if latitude is None or longitude is None:
+  location_ready=False;station=station_name;code=manual_code.strip().upper();st.info('Enter both latitude and longitude to use this location.')
+ else:
+  found=coordinate_location(station_name,latitude,longitude,manual_code)
+  station=found['name'];code=found['code'];location_source=found
+ st.caption('Coordinates are used exactly as entered; location name and station code are editable. Leave the code blank for a stable coordinate-based location ID. No automatic geocoding overwrites these inputs. Current scheduling timezone is Asia/Kolkata (India).')
+location_details=text_input('Location description / address (optional)',loaded.get('location_details',''))
 basis=st.radio('Analysis basis',['Historical extreme design + annual energy','Forecast day (operations only)'],horizontal=True,key='basis_'+str(st.session_state.get('restore_epoch',0)),index=0 if loaded.get('basis','Historical').startswith('Historical') else 1)
 last_year=datetime.now(timezone.utc).year-1
 first,last=st.columns(2)
@@ -70,7 +102,7 @@ key=(latitude,longitude,start_year,end_year,basis)
 @st.cache_data(ttl=86400,show_spinner=False)
 def cached_weather(lat,lon,first,last,basis):
  return weather(lat,lon,first,last) if basis.startswith('Historical') else weather(lat,lon)
-if st.button('Load weather and sunrise/sunset'):
+if st.button('Load weather and sunrise/sunset',disabled=not location_ready):
  try:
   with st.spinner('Loading complete hourly weather and daily sunrise/sunset...'):
    st.session_state['site_weather']=(key,*cached_weather(*key))
@@ -219,9 +251,9 @@ if meter_file is not None:
  except Exception as exc:st.error('Meter data invalid: '+str(exc))
 label=text_input('Station design label',loaded.get('design_label','Facility energy design'))
 notes=st.text_area('Revision notes')
-input_snapshot=dict(station=station,code=code,latitude=latitude,longitude=longitude,basis=basis,start_year=start_year,end_year=end_year,rooms=rooms.to_dict('records'),circuits=circuits.to_dict('records'),assumptions=p,solar_area_m2=roof_area,area_per_kwp=m2kw,evaluated_pv_kwp=installed,facility_template=st.session_state.get('active_template','Custom / blank'),running_room_program=program,design_label=label,ev_settings=dict(groups=ev_groups.to_dict('records'),managed=ev_managed,ceiling=ev_ceiling,firm=ev_firm,in_meter=ev_in_meter),measured_monthly=measured_monthly.to_dict('records') if measured_monthly is not None else None,
+input_snapshot=dict(station=station,code=code,location_mode=location_mode,location_details=location_details,location_source=location_source,latitude=latitude,longitude=longitude,basis=basis,start_year=start_year,end_year=end_year,rooms=rooms.to_dict('records'),circuits=circuits.to_dict('records'),assumptions=p,solar_area_m2=roof_area,area_per_kwp=m2kw,evaluated_pv_kwp=installed,facility_template=st.session_state.get('active_template','Custom / blank'),running_room_program=program,design_label=label,ev_settings=dict(groups=ev_groups.to_dict('records'),managed=ev_managed,ceiling=ev_ceiling,firm=ev_firm,in_meter=ev_in_meter),measured_monthly=measured_monthly.to_dict('records') if measured_monthly is not None else None,
  transformer_settings=dict(power_factor=power_factor,utilization=transformer_util,reserve=transformer_reserve),bess_settings=dict(kwh=bess_kwh,kw=bess_kw,eff=bess_eff,capex=bess_capex,om=bess_om),grid_contract=dict(current=current_contract,rate=demand_rate,floor=min_fraction,excess=excess_rate,reserve=contract_reserve,step=contract_step,no_generation_credit=restore_basis))
-if st.button('Create station design revision'):
+if st.button('Create station design revision',disabled=not location_ready):
  try:
   parent=st.session_state.get('parent_revision')
   if parent and parent['station_code']!=code.strip().upper():parent=None
@@ -384,7 +416,7 @@ def report_pdf():
    tb=LongTable(rows,repeatRows=1,colWidths=[125]*len(part.columns));tb.setStyle([('GRID',(0,0),(-1,-1),.3,colors.grey),('BACKGROUND',(0,0),(-1,0),colors.whitesmoke),('VALIGN',(0,0),(-1,-1),'TOP')]);story.extend([tb,Spacer(1,10)])
  text('Generic Railway Facility Energy Design Studio Design','Title');text(f'{station} ({code}) | {latitude}, {longitude} | {basis}')
  text('Generated UTC '+datetime.now(timezone.utc).isoformat());text(f"Period: {f.time.iloc[0]} to {f.time.iloc[-1]}; {len(f):,} hourly records; Asia/Kolkata")
- text('Source and requests: '+json.dumps(provenance));text('Open-Meteo / ECMWF ERA5, CC BY 4.0. Reanalysis is modelled gridded history, not a local station extreme measurement.')
+ text('Location mode: '+location_mode+'; location source: '+json.dumps(location_source));text('Location description: '+location_details);text('Source and requests: '+json.dumps(provenance));text('Open-Meteo / ECMWF ERA5, CC BY 4.0. Reanalysis is modelled gridded history, not a local station extreme measurement.')
  text('Method and limitations','Heading1')
  text('Steady-state envelope conduction + solar surrogate + sensible/latent infiltration + equipment + people + assigned circuits. Cooling sizing assumes full people and all connected in-room circuits. Operating energy uses selected schedules; AC is continuous. Each circuit contributes once to electricity, and only assigned room circuits add room heat. Indoor RH is a cooling-load assumption, not an active humidity-control simulation.')
  text('All energy bins end at timestamp; sunrise/sunset overlaps use preceding-hour bins to align with mean radiation. Temperature and RH at the ending timestamp approximate bin conditions. PV uses GHI x kWp x performance ratio. BESS self-consumption and grid commitment charges are separate screening calculations; no joint PV/BESS/contract optimization, thermal storage, PV degradation, inter-room transfer, dynamic wall lag or CFD. Equipment derating and COP must be verified. Historical extreme capacity and forecast-day operations are separate. Polar sun cases are rejected.')

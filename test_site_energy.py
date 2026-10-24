@@ -1,3 +1,4 @@
+from station_lookup import find_station
 import numpy as np
 import pandas as pd
 from site_energy import ROOM_DEFAULT,calculate,schedule,economics,optimize_pv
@@ -51,7 +52,7 @@ def test_generic_ui_exports_with_cached_weather():
  at=AppTest.from_file(str(Path(__file__).with_name('app.py')),default_timeout=60).run()
  assert not at.exception
  last=datetime.now().year-1
- at.session_state['site_weather']=((18.872,79.444,last-29,last,'Historical extreme design + annual energy'),fixture(),{'source':'controlled test fixture','urls':[],'retrieved_utc':'test'})
+ at.session_state['site_weather']=((find_station('MCI')['latitude'],find_station('MCI')['longitude'],last-29,last,'Historical extreme design + annual energy'),fixture(),{'source':'controlled test fixture','urls':[],'retrieved_utc':'test'})
  at.run(timeout=60)
  assert not at.exception,list(at.exception)
  assert len(at.metric)==4
