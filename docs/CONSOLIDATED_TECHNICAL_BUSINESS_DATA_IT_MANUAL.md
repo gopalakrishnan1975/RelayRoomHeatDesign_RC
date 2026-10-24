@@ -1,6 +1,6 @@
 # Railway Facility Energy Design Studio
 ## Consolidated Technical, Business, Data, IT Architecture and User Manual
-**Edition:** 1.0 · 24 October 2026 · **Status:** Engineering screening and software reference, not certified procurement design.
+**Edition:** 2.0 — expanded book · 24 October 2026 · **Status:** Engineering screening and software reference, not certified procurement design.
 
 ### Document control and precedence
 This is the consolidated master for the GitHub application `gopalakrishnan1975/RelayRoomHeatDesign_RC`. It brings together the generic-room/site-energy manual, historical-extreme and N+1 guidance, running-room and station-version/grid-contract manual, station-code lookup manual, facility/transformer/BESS guide, hourly optimization and data/validation wiki, plus the implemented EV module. Earlier manuals remain as supporting source records. Where old documents say station codes are identifiers only, no BESS is supported, or the high-mast kiosk needs AC, **the current implementation and this master supersede those statements**. Recheck against source code for each release.
@@ -108,3 +108,252 @@ Run `python -m pytest -q` and Streamlit AppTest locally **before commit**. Test 
 - [Open-Meteo historical documentation](https://open-meteo.com/en/docs/historical-weather-api)
 - [Station directory source](https://github.com/prasenjit-27/Indian-Railway-Data)
 - [Telangana electricity regulator (verify current category and tariff)](https://www.tgerc.telangana.gov.in/)
+
+
+---
+
+# Part II — Detailed engineering, demand assessment, commercial and implementation handbook
+
+This part expands the preceding consolidated overview into a practical design and governance handbook. It preserves the historical relay-room work as a separate legacy research method while identifying the current multi-facility code path. **Version distinction:** the legacy dynamic setpoint optimizer, spatial heat-map surrogate and synthetic-weather demonstration are not capabilities of the default generic-room design engine. Likewise proposed REST endpoints, authenticated database and automated sanctioned-load revision are future architecture, not implemented services.
+
+## Chapter 14. Engineering design basis and survey protocol
+
+### 14.1 Define the site boundary
+A railway station can include S&T relay rooms, station offices, passenger waiting areas, booking halls, commercial stalls, public toilets, parking/EV chargers, running rooms, pumps, outdoor high-mast lighting and shared transformers. Define an electrical boundary before adding loads. Record whether the boundary is one DISCOM meter, a transformer secondary, a distribution board or a collection of buildings. A meter may cover multiple consumers and concessionaires; assign their loads to a distinct owner and billing point to avoid duplicate demand or incorrectly claimed solar savings.
+
+A **site** is a geographical/electrical study boundary; a **facility** is a building or installation; a **zone** is a thermally or operationally distinct room; an **asset** is a load, generator, meter or HVAC unit; a **circuit** is the scheduled electrical load connecting assets; a **scenario** is a set of assumptions. A station may contain multiple site studies, and a running room may have a different supply, tariff and owner from the passenger station.
+
+### 14.2 Site survey form
+Capture the station code and location mode, surveyed GPS of each facility, elevation if known, north orientation, drawings, measured room dimensions, construction material and insulation, roof exposure, glazing SHGC and shading, door usage, occupancy roster, equipment inventory, HVAC nameplates, electrical single-line diagram, transformer and feeder ratings, sanctioned contract demand, tariff category, PV rooftop usability, inverter/meter position and historical electricity bills. Record the measurement method, surveyor, date, uncertainty, photo/drawing reference and responsible approving department. The offline station-code directory is a navigation aid, not a substitute for survey.
+
+For each room: length, width, height, roof exposure fraction, opaque wall area, window/door area and type, ACH or ventilation rate, indoor temperature/RH target, maximum simultaneous occupants, occupancy schedule, continuous equipment kW, scheduled lighting/fans/other loads, AC count and OEM capacity at design conditions. Where building materials are unknown, flag U-values as **assumed** and conduct sensitivity runs; do not present defaults as measured facts.
+
+### 14.3 Load classification
+Classify every electrical asset as critical continuous, ordinary continuous, scheduled, occupancy-linked, seasonal, weather-driven, charging/flexible, generation or storage. For example: signalling racks are critical continuous; lighting follows daylight and operating hours; AC follows weather and setpoint; hot water follows guest demand; EV load is flexible only within the customer's charging window. Distinguish nameplate power, measured steady power, starting power, coincident maximum and annual energy. The sum of nameplates is **connected load**, not automatically the site's maximum demand.
+
+### 14.4 Design cases
+Maintain separate cases for historical cooling extreme; maximum coincident electrical demand; annual energy and bills; summer high-temperature/low-PV condition; humid monsoon; low occupancy; high guest turnover; relay-room AC unit failure; grid outage; BESS at minimum reserve; and EV charging surge. Record which cases are actually simulated by the current tool and which require engineering review outside it.
+
+## Chapter 15. Detailed demand assessment methodology
+
+### 15.1 Bottom-up demand model
+For load group g and hourly bin t, define `P_g,t = N_g × p_g × u_g,t × d_g,t`, where N is equipment count, p is electrical input kW/item, u is utilization or on/off duty fraction, and d is an optional derating/diversity factor justified by field data. Do **not** apply arbitrary diversity to critical continuous loads. For HVAC, derive `P_AC,t = Q_cooling,t / COP_t`; for EV, use the charger scheduler rather than multiplying connected charger kW by 24 hours. Sum groups only after establishing the same timestamp and electrical boundary: `P_site,t = Σ_g P_g,t`.
+
+Peak coincident power `P_peak=max_t P_site,t`; energy `E=Σ_t P_site,t Δt`. For one-hour bins, numerical kW values summed over time yield kWh. Monthly maximum kVA is computed from measured kVA or measured kW/PF, **not** by dividing all months by an assumed common PF. Use 15- or 30-minute data where the utility demand register is based on that interval. The current meter parser accepts up to one-hour gaps but does not certify billing-interval conformity.
+
+### 15.2 Illustrative load register
+| Facility / asset | Quantity basis | Duty assumption | Peak driver | Evidence |
+|---|---|---|---|---|
+| S&T racks | measured rack input kW | 24×7 | nameplate/telemetry and future equipment | S&T asset register |
+| Relay-room AC | calculated cooling / COP | continuous setpoint | coincident extreme T/RH/GHI and equipment | OEM maps, sensors |
+| Waiting-hall lights | fixture count × input W | daylight/night or operating | sunrise/sunset and occupancy | electrical survey |
+| High-mast lighting | luminaire count × W | night | fixture schedule | lighting asset register |
+| Running-room bedrooms | rooms × occupants + AC | guest sleeping profile | peak permitted guests | room register |
+| Kitchen / dining | equipment and exhaust | meal windows | meal count and appliance duty | catering survey |
+| Hot water / laundry | heater and motor kW | occupied windows | guest turnover | meters and process cycle |
+| EV AC/DC charging | connectors × input kW | arrival/window and energy | served sessions and simultaneous charging | concessionaire logs |
+| Water pumping | pump input kW | controlled cycle | tank refill and water demand | pump schedule |
+
+This table defines an inventory method, not default procurement quantities. Connected charger power is an upper bound; actual delivered kWh depends on energy request, duration, available connectors and the import ceiling. Do not equate **requested** charging with **served** charging; record unserved energy as a service-level failure.
+
+### 15.3 Load duration, diversity and uncertainty
+Report the distribution of hourly kW, not just a single maximum: annual kWh, top 1% demand hours, monthly peaks, daytime/nighttime averages, seasonal peaks and load factor `LF = E/(P_peak × hours)`. For a multi-building station, compare `max_t Σ_b P_b,t` with `Σ_b max_t P_b,t` to quantify coincident diversity. Use actual meter/asset telemetry to calibrate duty fractions and uncertainty intervals. When a station has new EV chargers, a planned kitchen, or a proposed waiting hall, include a future-growth case before sizing the transformer or revising sanctioned demand.
+
+### 15.4 Time conventions and quality
+The historical engine uses IST and hour-ending weather timestamps. Align demand and irradiance to the preceding one-hour interval; sunrise/sunset overlap can be fractional. Normalize daylight-saving issues if later extending beyond India. Maintain a single time-zone-aware canonical time in future databases, with UTC stored and IST displayed. Reject missing, duplicated, nonfinite or misordered weather intervals. For measured meters, annotate gaps, unit conversions, CT/PT multipliers and estimated reads. **A complete weather year is not evidence that measured utility data are complete.**
+
+### 15.5 Demand assessment worked illustration
+Suppose a *hypothetical* facility has 10 kW critical electronics, 3 kW night lighting, 8 kW daytime commercial loads, 12 kW cooling at the governing hour and a 64 kW DC charger. A naïve connected sum is 97 kW. If the charger is inactive during the critical cooling hour, the coincident demand is only 33 kW at that hour; at a later charger-active hour, demand may exceed it. The true peak requires the full synchronized hourly profile. These figures illustrate the method only and are not results for any real station.
+
+## Chapter 16. HVAC thermal physics, reliability and acceptance
+
+### 16.1 Heat-flow components
+The envelope conduction, solar surrogate, infiltration sensible/latent, people and internal electrical components are defined in Part I. The humidity ratio is `w=0.62198 p_v/(101325-p_v)`, with `p_v=RH × 610.94 exp[17.625T/(T+243.04)]` Pa when RH is a fraction. Total cooling is the sum of sensible and latent terms; room heat gain and compressor electrical input are distinct quantities. The default generic-room method clips negative outward-to-inward conduction, so it does not calculate free cooling or heating.
+
+For the relay room, ensure the actual control sensor and maximum equipment temperature correspond to the **relay-end hotspot**, not merely the average air temperature. A hypothetical uniform spatial heat map is not CFD and cannot certify rack hot spots. Evaluate infiltration from doors, cable penetrations and required ventilation, not only nominal ACH.
+
+### 16.2 Historical coincident design
+For each candidate historical hour h, compute `Q_h=Q(T_h,RH_h,GHI_h,occupants_max,equipment_max)`; select `Q_design=(1+allowance) max_h Q_h`. Do not combine the hottest dry-bulb of one hour with the maximum RH and solar from other hours and call it a historical observation. Optional temperature uplift is a stress sensitivity, not an observed return-period event. Historical empirical percentiles (0.4%, 1%, 2%) are descriptive and not certified ASHRAE conditions.
+
+### 16.3 Redundancy and common-mode risks
+For installed equal AC units, `Q_surviving=(N-1)×TR×3.517×f`. This screens the loss of one largest unit. It does not guarantee duty rotation, standby startup, independent power, humidity, airflow, or failure of the control panel. A separate legacy relay-room failure-delay sensitivity uses `ΔT≈(cooling shortfall × delay_hours)/thermal_capacitance`; this lumped approximation does not predict equipment temperature gradients or moisture transients. Critical S&T rooms require separate sign-off for independent sensors, alarms, electrical redundancy, backup and fault-response procedures.
+
+### 16.4 Engineering acceptance
+Record room setpoint and tolerance, RH range, hotspot temperature, equipment heat rejection, installed AC total/sensible capacity at actual ambient, compressor restart restrictions, condenser airflow, unit placement, air distribution, condensate routing and backup supply. Conduct site trials under hot/humid periods and simulated unit-out conditions only under approved safe procedures. Calibrate model temperature and kWh errors and retain test certificates.
+
+## Chapter 17. Running-room demand as a hotel operation
+
+A running room is not a single air-conditioned rectangle. It has bedrooms, lobby, dining, kitchen, toilets/bathrooms, laundry, corridors, pumps, hot-water loads and staff. Configure number of bedrooms, beds per bedroom, maximum guests and staff. The software generates bedroom zones and service areas, while every row remains editable. Capacity check: `peak_guests ≤ rooms × beds_per_room`. Sleeping fractions reflect peak guests; shared-zone allocations avoid simultaneous double counting. Design capacity per bedroom may conservatively use all its beds even if typical energy simulation assumes partial occupancy.
+
+Use at least three operational profiles: normal roster, full occupancy and surge/irregular train arrivals. Meal windows and laundry/heating duty are editable placeholders, not measured catering demand. For more accurate demand, model occupancy arrival/departure, bath/shower hot-water litres per guest, water inlet temperature, heater COP/efficiency, storage losses, kitchen meal production, cooking fuel and exhaust/makeup air. These are **future detailed process models**, not current engine outputs.
+
+A running room's commercial assessment should include electricity per occupied bed-night, AC kWh/bed-night, hot-water kWh/guest, connected kVA per room, annual demand charge and solar self-consumption. Capital options may include efficient HVAC, occupancy-linked controls, solar water heating, PV and BESS; compare all against comfort, hygiene and staff requirements.
+
+## Chapter 18. EV charging demand, flexibility and concession economics
+
+### 18.1 Two-wheeler and four-wheeler demand
+Use distinct charger groups for two-wheelers and four-wheelers, AC destination charging and DC fast charging. Example grid input powers in the application are editable; verify actual input power and electrical safety requirements. Requested battery energy per day is `vehicles/day × battery_kWh/session`. Requested grid energy divides by charger efficiency. Installed connection capacity is `points × input_kW/point`. The charging algorithm attempts to serve energy in allowed time windows; unserved battery kWh is a visible service deficit.
+
+### 18.2 Managed charging
+The managed heuristic favors surplus PV and lower-tariff hours and limits incremental EV charging to an entered site import ceiling. The ceiling should be treated as **enforced** only where a verified external controller exists; otherwise it is a planning scenario. The model is not an ISO 15118/OCPP integration, queue simulator or network-constrained optimal power flow. DC charger nameplate output and mains input are different; transformer and cable selection require the latter plus harmonic and power-quality assessment.
+
+### 18.3 Commercial evaluation
+Consider concessionaire business model: owned/leased chargers, connection and transformer cost, energy purchase, demand charges, customer tariff per kWh or session, idle fees, uptime, parking revenue, maintenance, payment gateway, taxes, battery degradation where owned, and utilization ramp-up. Annual contribution can be screened as `charging revenue + ancillary revenue - energy bill - demand charges - operating cost`; investment NPV discounts this net contribution and capital/replacement cash flows. No concession tariff or utilization forecast is embedded as a factual assumption in the software. If station solar and charger ownership differ, define commercial settlement explicitly.
+
+### 18.4 Future EV features
+Add stochastic arrivals and queueing, charger sharing, vehicle-specific charging taper, minimum service level, station peak management, time-of-use and parking pricing, battery swapping inventory, two-wheeler pack charging racks, demand response and power-quality constraints. Label swapping as unsupported in the current code despite the historical example row that mentions it.
+
+## Chapter 19. PV, storage and transformer planning
+
+### 19.1 Solar resource and siting
+The current PV proxy uses hourly GHI, nominal DC kWp and performance ratio. Detailed feasibility requires usable roof/land polygons, structural loading, tilt/azimuth, shade study, inverter AC capacity, temperature coefficients, wiring losses, clipping, soiling, cleaning access, fire and electrical clearances, export permissions and actual net-metering settlement. Distinguish kWp (DC rating), inverter kW (AC rating), annual kWh and instantaneous coincident PV contribution. **Do not treat annual solar savings as guaranteed reduction in sanctioned kVA.**
+
+### 19.2 Battery operation and limits
+The existing dispatch charges from solar surplus and discharges against load subject to power and SOC limits. If round-trip efficiency is η, use symmetric charge/discharge efficiency `sqrt(η)`. Enforce `SOC_min ≤ SOC_t ≤ SOC_max` and no artificial energy at the first interval. Distinguish nominal battery kWh, usable kWh, inverter kW, backup duration and power reserve. The tool does not design BMS, PCS, fire protection, thermal runaway mitigation, battery degradation, replacement or grid-forming capability.
+
+### 19.3 Transformer assessment
+The current preliminary screen uses demand, reserve, PF and utilization plus possible export. Actual design additionally requires diversified phase currents, voltage drop, short circuit, fault withstand, breaker selectivity, earth fault, harmonics from chargers/inverters, thermal derating, duty cycle, redundancy and sanctioned connection conditions. Separate transformer **rated kVA** from utility **contracted demand kVA**; neither can be optimized safely from a single annual kWh number.
+
+### 19.4 Combined dispatch scenarios
+Evaluate base case, PV-only, PV+BESS, PV+managed EV and PV+BESS+managed EV against the same weather, facility schedule and tariff. Compare hourly import/export, demand exceedances, battery throughput, unserved EV demand, annual bill, lifecycle cost and reliability. The current software does not solve a global multi-variable optimization across PV, BESS, EV, AC setpoints and contract kVA; scenario comparisons are a practical interim method.
+
+## Chapter 20. Commercial, procurement and financial decision framework
+
+### 20.1 Stakeholders and cost ownership
+Railways may pay facility electricity while concessionaires pay for commercial equipment or charging. Record owner, tariff account, metering point, capital funding source, maintenance obligation and energy reimbursement for each asset. Savings should be allocated only to the party that bears the underlying cost. For a common supply, use submetered allocation or an agreed transparent method; do not treat concessionaire loads as free railway energy.
+
+### 20.2 Cost and benefit categories
+| Category | Required input | Treatment |
+|---|---|---|
+| HVAC | purchase, installation, service, electricity, failure risk | room capacity and operating energy; external reliability appraisal |
+| Transformer/distribution | transformer, cable, protection, civil works, losses | preliminary kVA only; detailed capex external |
+| PV | ₹/kWp, annual O&M, life, export rate, degradation | current PV optimizer excludes degradation and many tariffs |
+| BESS | ₹/kWh and inverter, O&M, replacement, salvage | current simulation excludes replacement and degradation |
+| EV | charger capex, connection, energy, revenue, maintenance | energy modeled; concession P&L external |
+| Grid contract | sanctioned kVA, billed demand formula, penalties, minimum billing | candidate screen from uploaded intervals |
+| Reliability | downtime, service loss, critical safety consequence | qualitative or externally monetized; not embedded |
+| Carbon | emissions factor, policy value, reporting boundary | future extension; not automatically credited |
+
+### 20.3 Life-cycle cost and NPV
+For investment I, annual benefit B_y and annual operating cost O_y, `NPV=-I+Σ_y(B_y-O_y)/(1+r)^y`. Compare alternatives over a common economic horizon and real/nominal convention. Include replacements, salvage and tariff escalation only when explicitly modeled. Payback is supplementary and cannot replace NPV when options have different life or risk. The present PV module minimizes its own discounted lifecycle cost on a bounded capacity grid; do not present that as proof of a globally optimal station investment.
+
+### 20.4 Sanctioned-load change decision
+Use **actual billing interval data**, ideally 12 months or more covering seasonal conditions, and examine monthly maximum kVA, demand ratchets, billing minimums, overdrawal penalties, planned load growth, PV/BESS outage, charger additions and minimum redundancy. Obtain tariff-specific approval from the appropriate utility. A simulated lower grid import or annual energy saving is insufficient to reduce contracted capacity. The tool's contract comparison is an analytical aid, not an electronic application or regulatory approval.
+
+### 20.5 Procurement gate and audit
+The decision package should include: validated asset inventory; surveyed geometry and weather basis; equipment OEM performance curves; demand and power-quality study; N+1 and electrical safety checks; 15/30-minute meter evidence; sensitivity and uncertainty; tariff order and bill calculations; lifecycle cash flow; risk register; department approvals; installation and commissioning plan; as-built documentation; and post-commissioning M&V.
+
+## Chapter 21. Data architecture, dictionary and governance
+
+### 21.1 Canonical entities and keys
+| Table | Primary key | Selected fields | Data stewardship |
+|---|---|---|---|
+| Station | station_id | code, name, lat, lon, source_version | railway station master |
+| Site | site_id | station_id, electrical_boundary, tariff_account | electrical department |
+| Facility | facility_id | site_id, facility_type, survey_date | owning department |
+| Zone | zone_id | facility_id, geometry, target, ACH, exposed_roof | engineering/S&T |
+| Asset | asset_id | zone_id, class, rated_kw, OEM, serial, criticality | asset owner |
+| Circuit | circuit_id | asset_id, meter_id, duty_schedule | electrical department |
+| OccupancyProfile | profile_id | facility_id, timestamps, guests, staff | facility manager |
+| ChargerGroup | group_id | site_id, connectors, input_kw, efficiency, windows | EV operator |
+| WeatherObservation | site_id + timestamp | temperature, RH, GHI, source, quality | weather adapter |
+| MeterInterval | meter_id + timestamp | kw, kva, pf, interval, quality, multiplier | utility/electrical |
+| TariffVersion | tariff_id | category, effective_dates, charges, approval | finance/electrical |
+| DesignRevision | design_id + revision | parent_hash, config, author, approval | design custodian |
+| SimulationRun | run_id | design_hash, model_commit, weather_version, status | application |
+| HourlyResult | run_id + timestamp | thermal, load, PV, BESS, EV, import/export | simulation engine |
+| Approval | approval_id | design_revision, approver, decision, time | workflow owner |
+
+The above is a **proposed database schema**, not a description of tables already deployed. In the current Streamlit version, session data are in memory; JSON/CSV/PDF exports are manual. Prefer immutable revision payloads and content-addressed model artefacts. Keep private station drawings, meter records, personal occupancy data and access credentials out of public GitHub.
+
+### 21.2 Data validation contracts
+Weather: strict hourly completeness, source URL, retrieval UTC, units, timezone, model and no silent substitution. Station directory: exact code, source hash, coordinate bounds, fallback disabled. Geometry: nonnegative dimensions, valid wall opening area, unique room identifiers. Electrical: kW versus kVA explicit, PF valid, schedules bounded, one load-one owner. Meter: unique timestamps, correct interval and multipliers, measured-versus-estimated flags, monthly coverage. Financial: tariff effective date, currency, discount convention and bill reconciliation. Model: run SHA, scenario hash, engine version, input and output checksums.
+
+### 21.3 Future ingestion APIs
+Weather adapter: historical ERA5 archive and forecast with cache, throttling, retry and provenance. Asset adapter: approved railway asset register (not a guessed public station code). Meter adapter: CSV first, then read-only utility/AMI API with delegated credentials and audit. EV adapter: charger availability and transaction totals, with personally identifiable vehicle/customer information minimized. Every adapter needs versioned schemas, idempotency, error logs, source latency, credential rotation and rate-limit handling. Do not write directly to operational control systems from the planning application.
+
+### 21.4 Information security
+Separate public algorithm documentation from restricted drawings and operating data. Use least-privilege RBAC, MFA/SSO, encryption at rest/in transit, access logs, tenant boundaries, retention schedules, backups, change approvals and secret management. Do not publish meter account numbers, staff personal details, concessionaire commercial terms or live infrastructure diagrams in a public repository.
+
+## Chapter 22. IT implementation, services, API and deployment
+
+### 22.1 Current logical architecture
+`Streamlit app.py → station lookup / weather → thermal site_energy / extreme_design → facility_design / station_design / ev_charging → reports and downloadable JSON/CSV/PDF`. `legacy_app.py` retains original relay-room adaptive-temperature research. Source modules are separate Python files, but execute inside the same Streamlit process; they are **not independently deployed microservices**.
+
+### 22.2 Target modular architecture
+Introduce independently testable services: (1) station/asset master; (2) weather and solar resource; (3) facility thermal/occupancy; (4) electric demand aggregation; (5) EV service-level planning; (6) PV/BESS dispatch and economics; (7) meter/tariff validation; (8) scenario registry; (9) reporting; (10) approval/audit. Use REST or event contracts between services, immutable versioned inputs, a relational transactional store, time-series partitions and object storage for long hourly outputs. Maintain stateless compute workers for multi-year simulations. Do not introduce infrastructure complexity before stable schemas and a tested pilot.
+
+### 22.3 Proposed API examples
+```text
+POST /v1/stations/{station_id}/facilities
+POST /v1/designs                 create draft with parent revision
+GET  /v1/designs/{id}/revisions  retrieve audit history
+POST /v1/simulations            submit immutable design and weather references
+GET  /v1/runs/{run_id}          status, input hash, model SHA
+GET  /v1/runs/{run_id}/hourly   paginated results or signed export
+POST /v1/meters/{id}/intervals  ingest validated time series
+POST /v1/contracts/evaluate    candidate demand billing scenarios
+POST /v1/reviews/{id}/decision  signed approval/rejection
+```
+These endpoints are a **requirements proposal only**. A typical run request should contain `design_revision_id`, `weather_source_version`, `scenario_parameters`, `model_commit_sha` and `requested_outputs`; response should include `run_id`, `status`, `validation_errors`, `provenance` and checksum. Repeated identical submissions should be idempotent.
+
+### 22.4 Testing and CI/CD
+Before a code commit: compile Python; run pytest, deterministic weather fixtures, thermal and energy conservation, station lookup, EV and battery boundary conditions, revision hash checks, meter validation and Streamlit AppTest. After commit: GitHub Actions, package dependency and licence review, smoke test on deployed Streamlit, generate/inspect report PDF and validate a complete historical-year calculation. CI pass is not equivalent to production browser verification. Pin critical dependencies and retain rollback reference. Record run duration and memory use for long weather histories.
+
+### 22.5 Performance and observability
+The current engine uses vectorized Pandas/NumPy, five-year weather batches and caching. A fleet-scale platform should benchmark 8,760-hour and 30-year cases, avoid copying large tables across services, use asynchronous jobs and result caching keyed by source+config+model hashes, and monitor failures, API limits, queue times, model drift, report errors and cloud spend. Add observability without collecting sensitive facility details in public logs.
+
+## Chapter 23. Verification, measurement and validation plan
+
+### 23.1 Unit and integration tests
+- Geometry and invalid opening area; indoor versus exterior circuit heat; unique loads and circuit ownership.
+- Simultaneous temperature, humidity and GHI in historical extremes; no synthetic fallback; missing-hour rejection.
+- Room cooling versus AC electrical conversion; N+1 largest-unit-out and derating; no phantom cooling in unconditioned zones.
+- Running-room bed capacity, guest allocations, staff counts and schedule changes.
+- EV group input validation, connected kW, requested/served/unserved energy, managed import ceiling, 2W/4W categories and day-boundary behavior.
+- PV and grid conservation; SOC and battery power bounds; zero-PV and bounded optimum.
+- Measured kVA from kW/PF, duplicate intervals, sparse readings, monthly coverage and tariff candidate calculation.
+- Station lookup exactness, manual coordinate limits, changed-station weather invalidation and older revision restoration.
+- Report data provenance, JSON hash integrity, PDF/CSV download, legacy calculator isolation.
+
+### 23.2 Pilot acceptance metrics
+| Metric | Suggested measurement | Acceptance principle |
+|---|---|---|
+| AC energy error | predicted versus submetered daily/monthly kWh | threshold agreed after baseline study |
+| Temperature/RH | calibrated sensors near equipment and occupied zones | never exceed approved critical limits |
+| Site peak demand | simulated versus 15/30-min billed kVA | tariff-specific error and reserve review |
+| PV generation | inverter AC kWh versus model | weather/shading-normalized assessment |
+| BESS SOC/energy | meter and BMS log | power/SOC constraints, no energy creation |
+| EV service | sessions and requested/served kWh | explicit service-level target |
+| Running-room efficiency | kWh/occupied bed-night | normalize occupancy and climate |
+| Finance | modelled bill versus actual utility bill | explain demand/fixed/tax differences |
+
+Thresholds must be set by engineering and finance after obtaining actual baseline data; the software cannot certify itself by passing synthetic tests. For critical rooms, operational safety limits override optimization benefits.
+
+### 23.3 Traceability matrix
+Map every requirement to input, code module, test, report field, data source, approval owner and release version. Example: station-code lookup → `station_lookup.py` → `test_station_lookup.py` → location provenance → electrical survey confirmation. Meter billing → `station_design.py` → `test_station_design.py` → contract-options table → finance/DISCOM verification. EV served energy → `ev_charging.py` → `test_ev_charging.py` → charging summary → concessionaire operating logs.
+
+## Chapter 24. User operating procedures and troubleshooting
+
+**New station:** open Streamlit; choose station lookup and verify exact code, or manual coordinates; apply facility template; survey all room/asset rows; choose historical years; load weather; enter tariff, PV/BESS and EV inputs; run; review warnings; export PDF/CSV/JSON; create and archive station revision.
+
+**Revise station:** upload an existing revision JSON; verify displayed station, location, parent hash and revision; edit design assumptions; create next revision with notes; retain both old and new records. A hash-protected revision is not a central registry or signed approval.
+
+**Assess contracted kVA:** obtain measured interval data with correct unit/PF and utility interval; upload CSV; inspect coverage and monthly peaks; enter current sanction and applicable tariff; compare candidates with seasonal and outage reserve; seek utility approval. Do not change a contract from simulated hourly power alone.
+
+**Unexpected cooling failure:** check geometry, doors/windows, ACH, people, setpoint, equipment and circuit duplication; confirm same-hour weather and available OEM derating. **Unexpected EV shortfall:** check daily energy requested, connectors, input kW, allowed hours, managed import ceiling and charging efficiency. **Unexpected PV optimum:** check usable area, export credit, tariff, performance ratio, cost/discount assumptions and whether a forecast day was mistaken for a historical annual study. **Invalid station code:** switch to manual coordinates or correct the exact code; never rely on a stale previous station.
+
+## Chapter 25. Change history, supersession and document retention
+
+The project evolved from a relay-room AC and solar proof of concept to a multi-facility site-energy planner, then historical extreme/N+1 design, running-room hotel-like occupancy, station revision and grid commitment analysis, EV charging, and finally station-code lookup with manual facility coordinates. Legacy papers may describe synthetic weather, one-room heat maps, no storage, no station-code lookup or a single running-room zone. Those statements are historical and should not be treated as the current default application specification.
+
+**Retention policy recommendation:** keep this book as the current master; retain old manuals and LaTeX/PDF technical derivations in a clearly labelled superseded archive until checked for unique formulas, test evidence, design assumptions and provenance. Do not permanently delete source documents merely because they have been summarized. Any future deletion requires a separate explicit confirmation.
+
+### Bibliography and source register
+1. GitHub master, generic-room manual, running-room/grid manual, station lookup manual and wiki pages in `docs/`.
+2. Original OneDrive relay-room technical/business/data/IT manual, hourly AC/solar optimization paper, historical-extreme update and weather/PDF update; listed for provenance. Their complete contents were not re-extracted in this edition.
+3. Open-Meteo historical API: https://open-meteo.com/en/docs/historical-weather-api ; ERA5 gridded reanalysis and attribution as documented.
+4. Station directory: https://github.com/prasenjit-27/Indian-Railway-Data ; verify against authoritative railway data for operational use.
+5. Applicable utility tariff order and OEM HVAC/transformer/EV/BESS product documentation must be supplied and versioned per site.
+
+**Publication note:** This expanded edition is a source-backed consolidation of accessible GitHub manuals and documented OneDrive file inventory, with additional engineering, business and IT requirements analysis. It is not a verbatim merger of inaccessible OneDrive PDF/TeX contents, and no engineering field calibration is implied.
