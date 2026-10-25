@@ -29,3 +29,12 @@ Reviewed `app.py`, `station_design.py`, `station_lookup.py`, `site_energy.py`, `
 **Mandatory safeguards:** Never use simulated hourly peaks to authorize reduced contracted kVA. Require utility billing-interval (15/30-minute as applicable) data with complete seasonal evidence (preferably >=12 months), CT/PT multipliers, tariff-specific ratchets/penalties, PV/BESS outage, future EV growth, reserve and **DISCOM approval**. Preserve physics, derating and N+1 assumptions. No physical AC/charger control or utility contract submission. Fixes must pass the complete `pytest -q` and Streamlit AppTest suite **before code commit**, followed by CI and deployed-browser smoke testing.
 
 **Status:** Audit documentation only. No code repair or live-deployment certification was performed because a full local source checkout and originating browser context were unavailable.
+
+
+## Follow-up — 25 October 2026
+
+The repository's latest inspected commit remains `2f6ab8764f44245f46a17853df430232545df7cb` (audit documentation only); no application-code repair has been made. GitHub Actions [run 40116413793](https://github.com/gopalakrishnan1975/RelayRoomHeatDesign_RC/actions/runs/40116413793) reports **25 passed, 12 warnings in 7.49 s** (24 October 2026, 17:30 UTC). The 12 warnings arise from Streamlit/Pandas deprecated `DataFrame.reset_index(inplace=True)` usage.
+
+Reconfirmed the **missing meter timestamp** defect using a source-equivalent Python/Pandas reproduction of current `station_design.py` blob `39b1034c3d45b51e6ca512a48958d15f860c5e6e`: valid 80/99/90-kVA readings give a 99-kVA monthly peak, but assigning a null timestamp to the 99-kVA reading silently lowers the result to **90 kVA**. Two isolated assertions passed; this is **not** a fresh full-repository test. Reject null/NaT timestamps and add regression cases before any repair commit. The invalid-upload/stale-evidence, unassigned running-room guest, and managed-EV/PV-ranking findings remain open.
+
+Live deployment still could not be accessed via web fetch, and the connected browser requires the originating browser context. The deployed SHA, station/weather cache behavior, and actual PDF/CSV/JSON downloads remain **unverified**. A complete local source checkout is blocked by GitHub DNS resolution; **no application code changed**. Preserve portable-JSON-only revision storage, complete seasonal billing-interval meter evidence, DISCOM approval and the prohibition on physical AC control or utility contract submission. The follow-up status is also prepared for OneDrive.
