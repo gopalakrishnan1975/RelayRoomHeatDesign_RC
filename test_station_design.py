@@ -72,3 +72,25 @@ def test_restored_tariff_replaces_unsaved_widget_value():
  assert not at.exception
  assert next(x for x in at.number_input if x.label=='Base import Rs/kWh').value==8.
  assert next(x for x in at.text_input if x.label=='Station code').value=='SC'
+
+
+def test_missing_meter_timestamps_never_understate_monthly_peak():
+ meter=pd.DataFrame({'timestamp':pd.date_range('2025-01-01',periods=3,freq='15min'),'kva':[80.,99.,90.]})
+ assert monthly_demand(meter)['Measured peak kVA'].iloc[0]==99.
+ for bad in [None,pd.NaT,'']:
+  damaged=meter.copy()
+  damaged.loc[1,'timestamp']=bad
+  with pytest.raises(ValueError,match='timestamp'):
+   monthly_demand(damaged)
+
+def test_running_sleeping_profile_conserves_guests_and_exposes_overflow():
+ rooms,circuits=running_room(10,2,16)
+ for fraction in [0.,.5,1.]:
+  p=params();p.update(running_peak_guests=16,sleeping_profile=[fraction]*24)
+  _,hourly,_=calculate(fixture(),rooms,circuits,p)
+  assert np.allclose(hourly['Guests accounted for'],16.)
+  assert (hourly['Guests requiring bedroom overflow']>=0).all()
+  if fraction==0.:
+   assert hourly['Guests requiring bedroom overflow'].max()>0.
+  if fraction==1.:
+   assert np.allclose(hourly['Guests requiring bedroom overflow'],0.)

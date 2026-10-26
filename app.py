@@ -242,13 +242,19 @@ contract_step=col_input(c,'Contract comparison step kVA',min_value=1.,value=floa
 restore_basis=st.checkbox('Model grid capacity without PV or BESS credit',value=bool(grid_defaults.get('no_generation_credit',True)),key='credit_'+str(st.session_state.get('restore_epoch',0)))
 st.caption('Charges are user-defined screening rules, not a built-in utility tariff. Compare recorded demand, growth and seasonal peaks with the current contract; verify applicable category, billing minimum, ratchets, penalties and utility approval.')
 measured_monthly=pd.DataFrame(loaded['measured_monthly']) if loaded.get('measured_monthly') else None
+if measured_monthly is not None and meter_file is None:
+ st.warning('Demand summary restored from portable revision JSON; original interval readings have not been revalidated in this session. Re-upload original meter CSV and verify complete seasonal coverage before any contract decision.')
 if meter_file is not None:
  try:
   measured_monthly=monthly_demand(pd.read_csv(meter_file))
   st.dataframe(measured_monthly,hide_index=True)
   st.caption('Meter demand includes whatever PV/BESS operated during measurement. Review generation outages, battery availability and future occupancy before proposing a reduced contract.')
   if len(measured_monthly)<12 or (measured_monthly['Coverage %']<95).any():st.warning('Less than 12 months or incomplete interval coverage: do not treat this sample as a proven annual peak. Annualized costs are indicative.')
- except Exception as exc:st.error('Meter data invalid: '+str(exc))
+ except Exception as exc:
+  measured_monthly=None
+  st.error('Meter data invalid: '+str(exc))
+  st.error('Contract comparisons and design revision exports are blocked until the invalid replacement CSV is removed or corrected; saved demand data will not be reused silently.')
+  st.stop()
 label=text_input('Station design label',loaded.get('design_label','Facility energy design'))
 notes=st.text_area('Revision notes')
 input_snapshot=dict(station=station,code=code,location_mode=location_mode,location_details=location_details,location_source=location_source,latitude=latitude,longitude=longitude,basis=basis,start_year=start_year,end_year=end_year,rooms=rooms.to_dict('records'),circuits=circuits.to_dict('records'),assumptions=p,solar_area_m2=roof_area,area_per_kwp=m2kw,evaluated_pv_kwp=installed,facility_template=st.session_state.get('active_template','Custom / blank'),running_room_program=program,design_label=label,ev_settings=dict(groups=ev_groups.to_dict('records'),managed=ev_managed,ceiling=ev_ceiling,firm=ev_firm,in_meter=ev_in_meter),measured_monthly=measured_monthly.to_dict('records') if measured_monthly is not None else None,
@@ -273,6 +279,8 @@ if not 0<p['derating']<=1 or not 0<p['pv_pr']<=1 or p['cop']<1 or not 0<=p['shgc
  st.error('Capacity fraction/PV ratio must be 0-1, COP >=1, SHGC 0-1 and indoor RH <=100.');st.stop()
 try:
  summary,hourly,components=calculate(f,rooms,circuits,p)
+ if 'Guests requiring bedroom overflow' in hourly and (hourly['Guests requiring bedroom overflow']>1e-6).any():
+  st.warning('Sleeping-profile allocation exceeds shared-zone capacity in some hours. Residual guests remain in bedrooms; see the hourly CSV for guest conservation and overflow.')
 except Exception as exc:
  st.error('Check inputs: '+str(exc));st.stop()
 ev_base_hourly=hourly.copy()
@@ -355,10 +363,12 @@ try:
  options,contract_result,required_contract=contract_options(demand_basis,current_contract,demand_rate,min_fraction,excess_rate,contract_reserve,contract_step,max_kva=100000.)
  st.subheader('Grid commitment comparison')
  st.write(demand_label)
- st.write(f"Peak plus reserve basis: {required_contract:.2f} kVA; lowest-charge feasible comparison: {contract_result['Contract kVA']:.2f} kVA. Current: {current_contract:.2f} kVA.")
+ st.write(f"Peak plus reserve basis: {required_contract:.2f} kVA; lowest indicative cost among screened candidates (NOT an approved or recommended contract): {contract_result['Contract kVA']:.2f} kVA. Current: {current_contract:.2f} kVA.")
  st.dataframe(options,hide_index=True)
  if demand_rate==0:st.info('Enter actual demand charges before interpreting cost savings.')
  if measured_monthly is None:st.warning('No actual meter data supplied. Do not lower a utility commitment based on this simulation alone.')
+ elif len(measured_monthly)<12 or 'Coverage %' not in measured_monthly or (measured_monthly['Coverage %']<95).any():
+  st.warning('Incomplete seasonal meter evidence: these contract comparisons are indicative only. Require billing-interval data across all seasons, meter multipliers, applicable tariff and DISCOM approval; no reduction is authorized.')
  st.download_button('Download grid contract comparison CSV',options.to_csv(index=False),'grid_contract_options.csv','text/csv')
 except Exception as exc:st.error('Grid comparison unavailable: '+str(exc))
 
