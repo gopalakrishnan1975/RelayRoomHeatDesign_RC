@@ -99,19 +99,29 @@ def calculate(frame,rooms,circuits,p):
         electrical[key]+=power
         if row['Room'] in room_loads:
             room_loads[row['Room']]+=power;room_peak[row['Room']]+=watts
-    guest_alloc={};remaining_guests=None;bed_fraction=None
+    guest_alloc={};remaining_guests=None;bed_fraction=None;guest_overflow=None
     if 'running_peak_guests' in p and 'Guest_capacity' in rooms:
-        remaining_guests=np.full(n,float(p['running_peak_guests']))
+        peak=float(p['running_peak_guests'])
+        bed_capacity=float(rooms.loc[rooms.get('Zone_type')=='Bedroom','People'].sum())
+        if not np.isfinite(peak) or peak<0 or peak>bed_capacity:
+            raise ValueError('Running-room peak guests must fit bedroom capacity')
+        profile=np.asarray(p.get('sleeping_profile',[1.]*24),float)
+        if len(profile)!=24 or not np.isfinite(profile).all() or ((profile<0)|(profile>1)).any():
+            raise ValueError('Invalid sleeping profile')
+        desired_sleeping=peak*profile[(frame.time.dt.hour.to_numpy()-1)%24]
+        shared_to_place=peak-desired_sleeping
+        remaining_guests=np.full(n,peak)
         for zone in rooms.to_dict('records'):
             capacity=float(zone.get('Guest_capacity',0) or 0)
             if capacity>0:
-                allocated=np.minimum(remaining_guests,capacity*scheduled[zone['Occupancy']])
-                guest_alloc[zone['Room']]=allocated;remaining_guests-=allocated
-        bed_capacity=float(rooms.loc[rooms.get('Zone_type')=='Bedroom','People'].sum())
-        profile=np.asarray(p.get('sleeping_profile',[1.]*24),float)
-        if len(profile)!=24 or not np.isfinite(profile).all() or ((profile<0)|(profile>1)).any():raise ValueError('Invalid sleeping profile')
-        desired=float(p['running_peak_guests'])*profile[(frame.time.dt.hour.to_numpy()-1)%24]
-        bed_fraction=np.minimum(remaining_guests,desired)/max(1,bed_capacity)
+                allocated=np.minimum(remaining_guests,np.minimum(shared_to_place,capacity*scheduled[zone['Occupancy']]))
+                guest_alloc[zone['Room']]=allocated
+                remaining_guests-=allocated
+                shared_to_place-=allocated
+        # Shared rooms cannot always accommodate the requested awake fraction.
+        # Assign every remaining guest to a bedroom, exposing this limitation.
+        bed_fraction=remaining_guests/max(1,bed_capacity)
+        guest_overflow=np.maximum(0,remaining_guests-desired_sleeping)
     summaries=[];component_peaks=[];thermal_total=np.zeros(n)
     for room in rooms.to_dict('records'):
         name=room['Room'];area=room['Length_m']*room['Width_m'];volume=area*room['Height_m']
@@ -150,7 +160,9 @@ def calculate(frame,rooms,circuits,p):
     result=pd.DataFrame(electrical);result.insert(0,'Time IST',frame.time)
     result['Thermal cooling kW']=thermal_total;result['Total demand kW']=sum(electrical.values())
     result['GHI W/m2']=ghi;result['Ambient C']=t
-    if bed_fraction is not None:result['Guests accounted for']=sum(guest_alloc.values())+bed_fraction*bed_capacity
+    if bed_fraction is not None:
+        result['Guests accounted for']=sum(guest_alloc.values())+bed_fraction*bed_capacity
+        result['Guests requiring bedroom overflow']=guest_overflow
     return pd.DataFrame(summaries),result,pd.DataFrame(component_peaks)
 
 def economics(hourly,capacity,p,annual_years):
