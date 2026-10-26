@@ -61,6 +61,7 @@ def read_revision(raw):
 def monthly_demand(meter):
     """Read kVA or convert kW using per-interval PF; do not invent PF."""
     f=meter.copy();f['timestamp']=pd.to_datetime(f['timestamp'],errors='raise')
+    if f['timestamp'].isna().any():raise ValueError('Missing or invalid meter timestamps')
     if f.timestamp.duplicated().any():raise ValueError('Duplicate meter timestamps')
     if len(f)<2:raise ValueError('Upload at least two demand intervals')
     f=f.sort_values('timestamp')
