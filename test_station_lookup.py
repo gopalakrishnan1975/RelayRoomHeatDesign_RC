@@ -56,3 +56,21 @@ def test_manual_revision_and_old_revision_coordinates_are_preserved():
  assert saved['station_code'].startswith('LOC_')
  assert saved['payload']['latitude']==17.4 and saved['payload']['longitude']==78.5
  assert saved['payload']['location_mode']=='Manual coordinates'
+
+
+def test_weather_record_is_invalidated_after_station_change():
+ from datetime import datetime,timezone
+ from pathlib import Path
+ from streamlit.testing.v1 import AppTest
+ from test_site_energy import fixture
+ at=AppTest.from_file(str(Path(__file__).with_name('app.py')),default_timeout=60).run()
+ assert not at.exception
+ last=datetime.now(timezone.utc).year-1
+ old=find_station('MCI')
+ key=(old['latitude'],old['longitude'],last-29,last,'Historical extreme design + annual energy')
+ at.session_state['site_weather']=(key,fixture(),{'source':'controlled fixture','urls':[],'retrieved_utc':'test'})
+ at.run()
+ assert not at.exception and len(at.metric)==4
+ next(x for x in at.text_input if x.label=='Station code').set_value('SC').run()
+ assert not at.exception
+ assert len(at.metric)==0  # Stale location-specific results cannot be displayed.
