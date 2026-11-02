@@ -39,3 +39,8 @@ def test_lookup_revision_retains_saved_location_when_code_missing_from_current_c
     assert next(x for x in at.button if x.label=='Load weather and sunrise/sunset').disabled is False
     next(x for x in at.text_input if x.label=='Station code').set_value('ZZNOTREAL').run()
     assert next(x for x in at.button if x.label=='Load weather and sunrise/sunset').disabled is True
+    next(x for x in at.radio if x.label=='Location entry').set_value('Manual coordinates').run()
+    assert not at.exception
+    assert next(x for x in at.number_input if x.label=='Latitude').value is None
+    assert next(x for x in at.number_input if x.label=='Longitude').value is None
+    assert next(x for x in at.button if x.label=='Create station design revision').disabled is True
