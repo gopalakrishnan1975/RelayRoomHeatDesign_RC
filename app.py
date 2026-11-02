@@ -66,13 +66,39 @@ if location_mode=='Station code lookup':
  code=text_input('Station code',loaded.get('code','MCI')).strip().upper()
  st.session_state['pending_station_code']=code
  try:
-  found=find_station(code)
-  station=found['name'];latitude=found['latitude'];longitude=found['longitude'];location_source=found
+  saved_lookup=(loaded.get('location_mode')=='Station code lookup'
+                and str(loaded.get('code','')).strip().upper()==code
+                and loaded.get('latitude') is not None and loaded.get('longitude') is not None)
+  catalogue_found=None
+  try:
+   catalogue_found=find_station(code)
+  except ValueError:
+   if not saved_lookup:raise
+   st.warning('Saved station code is absent from the current directory. Historical coordinates are retained; verify station identity before new design work.')
+  adopt_catalogue=False
+  if saved_lookup and catalogue_found is not None:
+   adopt_catalogue=st.checkbox('Adopt current catalogue coordinates instead of saved revision',value=False,
+                               key='adopt_catalogue_'+code+'_'+str(st.session_state.get('restore_epoch',0)))
+  if saved_lookup and not adopt_catalogue:
+   latitude=float(loaded['latitude']);longitude=float(loaded['longitude'])
+   if not np.isfinite([latitude,longitude]).all() or not (-90<=latitude<=90 and -180<=longitude<=180):
+    raise ValueError('Saved revision coordinates are invalid')
+   found=dict(catalogue_found or {},code=code,name=loaded.get('station') or (catalogue_found or {}).get('name',code),
+              latitude=latitude,longitude=longitude)
+   location_source=loaded.get('location_source') or {'source':'Portable station revision'}
+   if catalogue_found and (abs(latitude-catalogue_found['latitude'])>1e-8 or abs(longitude-catalogue_found['longitude'])>1e-8):
+    st.warning('Current station directory coordinates differ from this saved design. Historical coordinates are retained until you explicitly adopt the catalogue location.')
+    st.caption(f"Current catalogue: {catalogue_found['latitude']:.6f}, {catalogue_found['longitude']:.6f}; saved: {latitude:.6f}, {longitude:.6f}.")
+  else:
+   found=catalogue_found
+   location_source=found
+  station=found['name'];latitude=found['latitude'];longitude=found['longitude']
   st.session_state['last_resolved_location']=found
   a,b,c=st.columns(3)
-  a.text_input('Station / site name',value=station,disabled=True,key='resolved_name_'+code+'_'+str(st.session_state.get('restore_epoch',0)))
-  b.number_input('Latitude',value=latitude,format='%.6f',disabled=True,key='resolved_lat_'+code)
-  c.number_input('Longitude',value=longitude,format='%.6f',disabled=True,key='resolved_lon_'+code)
+  widget_suffix=code+'_'+str(st.session_state.get('restore_epoch',0))+'_'+str(int(adopt_catalogue))
+  a.text_input('Station / site name',value=station,disabled=True,key='resolved_name_'+widget_suffix)
+  b.number_input('Latitude',value=latitude,format='%.6f',disabled=True,key='resolved_lat_'+widget_suffix)
+  c.number_input('Longitude',value=longitude,format='%.6f',disabled=True,key='resolved_lon_'+widget_suffix)
   st.caption('Matched '+code+' in the bundled community station directory (24 October 2026). Station-centre coordinates; select Manual coordinates for the actual facility location. Source: https://github.com/prasenjit-27/Indian-Railway-Data . Current scheduling timezone is Asia/Kolkata (India).')
  except Exception as exc:
   location_ready=False;station='';latitude=None;longitude=None
