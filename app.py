@@ -99,7 +99,12 @@ if location_mode=='Station code lookup':
   a.text_input('Station / site name',value=station,disabled=True,key='resolved_name_'+widget_suffix)
   b.number_input('Latitude',value=latitude,format='%.6f',disabled=True,key='resolved_lat_'+widget_suffix)
   c.number_input('Longitude',value=longitude,format='%.6f',disabled=True,key='resolved_lon_'+widget_suffix)
-  st.caption('Matched '+code+' in the bundled community station directory (24 October 2026). Station-centre coordinates; select Manual coordinates for the actual facility location. Source: https://github.com/prasenjit-27/Indian-Railway-Data . Current scheduling timezone is Asia/Kolkata (India).')
+  if catalogue_found is None:
+   st.caption('Coordinates and provenance restored from the saved portable revision; this code is not in the current community directory. Verify station identity independently.')
+  elif saved_lookup and not adopt_catalogue:
+   st.caption('Using saved revision coordinates and source provenance, not necessarily the current station-centre location. Current community catalogue: https://github.com/prasenjit-27/Indian-Railway-Data .')
+  else:
+   st.caption('Matched '+code+' in the bundled community station directory (24 October 2026). Station-centre coordinates; select Manual coordinates for the actual facility location. Source: https://github.com/prasenjit-27/Indian-Railway-Data . Current scheduling timezone is Asia/Kolkata (India).')
  except Exception as exc:
   location_ready=False;station='';latitude=None;longitude=None
   st.warning(str(exc))
