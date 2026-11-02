@@ -21,21 +21,44 @@ def charging_profile(hourly,groups,reference_pv_kwp,p,managed=False,site_import_
         if (vals[col]%1!=0).any():raise ValueError('EV counts and window hours must be integers')
     if not vals[['Start_hour','End_hour']].apply(lambda c:c.between(0,23)).all().all():raise ValueError('EV hours must be 0-23')
     if site_import_ceiling_kw<0:raise ValueError('Import ceiling must be nonnegative')
-    times=pd.to_datetime(hourly['Time IST']);hours=(times.dt.hour.to_numpy()-1)%24
+    # Time IST is the end of each hourly energy bin. Validate before
+    # assigning daily requests, or missing bins can create false service.
+    times=pd.to_datetime(hourly['Time IST'],errors='coerce')
+    if times.isna().any() or (len(times)>1 and not times.diff().iloc[1:].eq(pd.Timedelta(hours=1)).all()):
+        raise ValueError('EV time series must have complete, unique, chronological hourly timestamps')
+    bin_start=times-pd.Timedelta(hours=1)
+    hours=bin_start.dt.hour.to_numpy()
     base=hourly['Total demand kW'].to_numpy(float);solar=reference_pv_kwp*hourly['GHI W/m2'].to_numpy(float)/1000*p['pv_pr']
     mask=(hours>=p['peak_start'])&(hours<p['peak_end']) if p['peak_start']<p['peak_end'] else ((hours>=p['peak_start'])|(hours<p['peak_end']))
     rates=np.where(mask,p['peak_tariff'],p['tariff'])
-    grouped=pd.Series(np.arange(len(times))).groupby(times.dt.normalize().to_numpy()).apply(list)
     ev=np.zeros(len(base));summaries=[];connected=0.
     for row in groups.to_dict('records'):
         power=float(row['Points'])*float(row['Grid_kW_per_point']);connected+=power
         daily=float(row['Vehicles_per_day'])*float(row['Battery_kWh_per_vehicle'])/float(row['Efficiency'])
         start=int(row['Start_hour']);end=int(row['End_hour']);required=served=0.
+        excluded=0
+        if start==end:
+            # A full-day window is 24 consecutive hourly bins, including
+            # horizons starting at midnight rather than at 01:00.
+            service_days=np.arange(len(times))//24
+            window_hours=24
+        elif start<end:
+            service_days=bin_start.dt.normalize().to_numpy()
+            window_hours=end-start
+        else:
+            # An overnight window belongs to the day on which it starts.
+            service_days=(bin_start.dt.normalize()-pd.to_timedelta((hours<end).astype(int),unit='D')).to_numpy()
+            window_hours=24-start+end
+        grouped=pd.Series(np.arange(len(times))).groupby(service_days).apply(list)
         for indices in (grouped if daily>0 else []):
-            ids=np.asarray(indices);h=hours[ids]
+            ids=np.asarray(indices,dtype=int);h=hours[ids]
             allowed=((h>=start)&(h<end)) if start<end else (((h>=start)|(h<end)) if start>end else np.ones(len(h),bool))
-            required+=daily;remaining=daily
             cells=ids[allowed]
+            # Do not create a full day's demand from an incomplete window.
+            if len(cells)!=window_hours:
+                excluded+=1
+                continue
+            required+=daily;remaining=daily
             if not managed:
                 cells=cells[np.argsort((hours[cells]-start)%24)]
                 for i in cells:
@@ -54,5 +77,6 @@ def charging_profile(hourly,groups,reference_pv_kwp,p,managed=False,site_import_
                     if remaining<=1e-9:break
             served+=daily-max(0.,remaining)
         summaries.append({'Group':row['Group'],'Points':row['Points'],'Connected grid kW':power,'Requested battery kWh/day':daily*float(row['Efficiency']),
-                          'Requested grid kWh (period)':required,'Served grid kWh (period)':served,'Unserved battery kWh (period)':max(0,required-served)*float(row['Efficiency'])})
+                          'Requested grid kWh (period)':required,'Served grid kWh (period)':served,'Unserved battery kWh (period)':max(0,required-served)*float(row['Efficiency']),
+                          'Incomplete service windows excluded':excluded})
     return ev,pd.DataFrame(summaries),connected
