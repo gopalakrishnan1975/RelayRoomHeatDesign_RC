@@ -112,11 +112,15 @@ else:
  previous=st.session_state.get('last_resolved_location',{})
  pending=st.session_state.get('pending_station_code','')
  if pending and pending!=previous.get('code'):previous={}
+ # A newly typed code must not inherit coordinates from an unrelated
+ # restored revision when the user switches to Manual coordinates.
+ use_loaded=not pending or pending==str(loaded.get('code','')).strip().upper()
+ manual_defaults=loaded if use_loaded else {}
  a,b,c,d=st.columns(4)
- station_name=col_text(a,'Station / site name',loaded.get('station',previous.get('name','')))
- manual_code=col_text(b,'Station code',loaded.get('code',pending or previous.get('code','')))
- latitude=col_input(c,'Latitude',-90.,90.,loaded.get('latitude',previous.get('latitude')),format='%.6f')
- longitude=col_input(d,'Longitude',-180.,180.,loaded.get('longitude',previous.get('longitude')),format='%.6f')
+ station_name=col_text(a,'Station / site name',manual_defaults.get('station',previous.get('name','')))
+ manual_code=col_text(b,'Station code',manual_defaults.get('code',pending or previous.get('code','')))
+ latitude=col_input(c,'Latitude',-90.,90.,manual_defaults.get('latitude',previous.get('latitude')),format='%.6f')
+ longitude=col_input(d,'Longitude',-180.,180.,manual_defaults.get('longitude',previous.get('longitude')),format='%.6f')
  if latitude is None or longitude is None:
   location_ready=False;station=station_name;code=manual_code.strip().upper();st.info('Enter both latitude and longitude to use this location.')
  else:
