@@ -5,7 +5,7 @@
 - Inspected `app.py`, `ev_charging.py`, `station_design.py`, `station_lookup.py` and their regression tests on `main`.
 - Latest completed baseline GitHub Actions run: [41409192998](https://github.com/gopalakrishnan1975/RelayRoomHeatDesign_RC/actions/runs/41409192998), 2 November 2026, SHA `5ba3f254d0ec47cf24f736668eee8d6f54999546`, **29 passed, 12 warnings**. This tests the existing main branch.
 - Reran the revised EV scheduler in an isolated local environment: **15 focused tests passed**. Coverage: 48-hour daytime, overnight, all-day, incomplete windows, year-end, managed ceiling, zero points and invalid timestamps.
-- Opened [draft PR #3](https://github.com/gopalakrishnan1975/RelayRoomHeatDesign_RC/pull/3) on `fix/ev-service-day-2026-11-02` with the EV correction and eight additional repository regression tests. Do not merge before the complete branch CI passes.
+- Opened [draft PR #3](https://github.com/gopalakrishnan1975/RelayRoomHeatDesign_RC/pull/3) on `fix/ev-service-day-2026-11-02` with the EV correction and eight additional repository regression tests. **Merged into main** after complete branch CI [41484879915](https://github.com/gopalakrishnan1975/RelayRoomHeatDesign_RC/actions/runs/41484879915) passed **37 tests, 12 warnings**. Squash merge SHA: `21ac3dfd2ee4de65bef9a7cbc1197d6a69a58bb5`. Live Streamlit verification remains separate.
 
 ## Defect and proposed correction
 
@@ -20,6 +20,6 @@
 
 ## Existing coverage, not new end-to-end certification
 
-The baseline suite covers running-room bedrooms, guest conservation, shared areas, kitchen/laundry/unconditioned zones, portable revision hashes and parent chain, meter timestamp/PF validation, contract-kVA screening, station-code and Manual coordinates, location-dependent weather invalidation, facility templates, historical N+1, sunrise/sunset, whole-site electricity, transformer/BESS, PV economics and Streamlit download controls. The proposed EV change needs a complete CI run and live smoke test before release.
+The baseline suite covers running-room bedrooms, guest conservation, shared areas, kitchen/laundry/unconditioned zones, portable revision hashes and parent chain, meter timestamp/PF validation, contract-kVA screening, station-code and Manual coordinates, location-dependent weather invalidation, facility templates, historical N+1, sunrise/sunset, whole-site electricity, transformer/BESS, PV economics and Streamlit download controls. The EV correction passed complete branch CI and was merged; the deployed Streamlit build and live downloads still require a separate smoke test.
 
 **Safety and governance:** station revision JSON files are portable and hash-protected, not a central registry or approval system. Hourly simulated peaks cannot authorize grid-commitment reduction; complete seasonal utility billing-interval evidence, meter multipliers, tariff verification and DISCOM approval remain mandatory. No physical AC control or utility submission was performed. Thermal physics and approved safety assumptions were not changed.
